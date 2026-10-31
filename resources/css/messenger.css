@@ -122,6 +122,10 @@
 .relay-icon:hover {
     background: #eaf0e9;
 }
+.header-actions .relay-icon:hover,
+.relay-call .relay-icon:hover {
+    background: transparent;
+}
 .relay-icon svg {
     width: 20px;
     height: 20px;
@@ -1006,9 +1010,6 @@
     gap: 10px;
     background: #c14f47;
     box-shadow: 0 4px 16px #0002;
-}
-.relay-call-controls .relay-hangup:hover:not(:disabled) {
-    background: #a9423c;
 }
 .relay-call-controls .relay-hangup svg {
     width: 20px;

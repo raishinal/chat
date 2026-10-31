@@ -1,5 +1,5 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 import {
@@ -41,6 +41,7 @@ import {
     type Page,
 } from '@/lib/chat-api';
 import { useChatCall, type Signal } from '@/hooks/use-chat-call';
+import { callSeconds } from '@/lib/call-media';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
 import { me, users as usersRoute } from '@/routes/api';
 import * as conversationsRoute from '@/routes/api/conversations';
@@ -57,6 +58,8 @@ import {
     type RealtimeRecovery,
 } from '@/lib/realtime-recovery';
 import AdminPanel from '@/components/chat/admin-panel';
+import ChangePassword from '@/components/chat/change-password';
+import MessageContent from '@/components/chat/message-content';
 import '../../css/messenger.css';
 type Envelope<T> = { data: T };
 function subscriptionFailure(error: unknown, channel: string): string {
@@ -109,10 +112,51 @@ function Media({
     muted?: boolean;
 }) {
     const ref = useRef<HTMLVideoElement>(null);
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [audioBlocked, setAudioBlocked] = useState(false);
     useEffect(() => {
         if (ref.current) ref.current.srcObject = stream;
-    }, [stream]);
-    return <video ref={ref} autoPlay playsInline muted={muted} />;
+        const audio = audioRef.current;
+        let disposed = false;
+        if (audio && !muted) {
+            audio.srcObject = stream;
+            if (stream?.getAudioTracks().length)
+                void audio
+                    .play()
+                    .then(() => {
+                        if (!disposed) setAudioBlocked(false);
+                    })
+                    .catch(() => {
+                        if (!disposed) setAudioBlocked(true);
+                    });
+        }
+        return () => {
+            disposed = true;
+            if (audio) {
+                audio.pause();
+                audio.srcObject = null;
+            }
+        };
+    }, [stream, muted]);
+    return (
+        <>
+            <video ref={ref} autoPlay playsInline muted />
+            {!muted && <audio ref={audioRef} autoPlay />}
+            {!muted && audioBlocked && (
+                <button
+                    className="relay-secondary"
+                    onClick={() => {
+                        void audioRef.current
+                            ?.play()
+                            .then(() => setAudioBlocked(false))
+                            .catch(() => setAudioBlocked(true));
+                    }}
+                >
+                    Enable call audio
+                </button>
+            )}
+        </>
+    );
 }
 function FilePreview({
     attachment: a,
@@ -220,9 +264,21 @@ export default function Messenger() {
         bottom = useRef<HTMLDivElement>(null),
         requestVersion = useRef(0),
         latestServerId = useRef(0),
+        oldestServerId = useRef(0),
         seenNotices = useRef(new Set<number>()),
         noticesInitialized = useRef(false);
     const call = useChatCall(self.id, setError);
+    const viewport = useRef<HTMLElement>(null);
+    const historyContent = useRef<HTMLDivElement>(null);
+    const followLatest = useRef(true);
+    const initialBottom = useRef(true);
+    const olderInFlight = useRef(false);
+    const scrollAnchor = useRef<{
+        id: number;
+        height: number;
+        top: number;
+    } | null>(null);
+    const [olderLoading, setOlderLoading] = useState(false);
     const messageSound = useNotificationSound();
     useEffect(() => {
         latestServerId.current = Math.max(
@@ -294,6 +350,11 @@ export default function Messenger() {
         }
     }
     async function open(c: Conversation) {
+        followLatest.current = true;
+        initialBottom.current = true;
+        scrollAnchor.current = null;
+        olderInFlight.current = false;
+        setOlderLoading(false);
         selectedRef.current = c;
         setSelected(c);
         latestServerId.current = 0;
@@ -317,6 +378,9 @@ export default function Messenger() {
             if (version === requestVersion.current) setLoading(false);
         }
     }
+    oldestServerId.current = Math.min(
+        ...messages.filter((m) => !m.pending && !m.failed).map((m) => m.id),
+    );
     async function reconcile() {
         await Promise.all([refreshConversations(), refreshNotices()]);
         const c = selectedRef.current;
@@ -325,7 +389,9 @@ export default function Messenger() {
                 api<Page<Message>>(
                     messagesRoute.index(c.id, {
                         query: {
-                            after_id: latestServerId.current || undefined,
+                            after_id: Number.isFinite(oldestServerId.current)
+                                ? Math.max(0, oldestServerId.current - 1)
+                                : undefined,
                         },
                     }),
                 ),
@@ -341,6 +407,14 @@ export default function Messenger() {
                 next = page.links?.next;
             }
             list.sort((a, b) => a.id - b.id);
+            setViewer((current) =>
+                current &&
+                !list.some((m) =>
+                    m.attachments.some((a) => a.id === current.id),
+                )
+                    ? null
+                    : current,
+            );
             setSelected(updated.data);
             selectedRef.current = updated.data;
             setMessages((old) => {
@@ -391,7 +465,7 @@ export default function Messenger() {
                 document.hasFocus()
             )
                 return;
-            if (n.kind === 'message') messageSound.play();
+            if (n.kind !== 'incoming_call') messageSound.play();
             if (
                 browserAlerts &&
                 'Notification' in window &&
@@ -505,6 +579,22 @@ export default function Messenger() {
                 setLiveError(realtimeConnectionIssue(event));
         });
         echo.private(`v1.users.${self.id}`)
+            .listen(
+                '.v1.conversation.deleted',
+                (event: Envelope<{ conversation_id: number }>) => {
+                    const id = event.data.conversation_id;
+                    setConversations((old) =>
+                        old.filter((conversation) => conversation.id !== id),
+                    );
+                    if (selectedRef.current?.id === id) {
+                        requestVersion.current++;
+                        selectedRef.current = null;
+                        setSelected(null);
+                        setMessages([]);
+                        setCursor(null);
+                    }
+                },
+            )
             .subscribed(() =>
                 setLiveError((previous) =>
                     previous.startsWith('Private user channel') ? '' : previous,
@@ -553,6 +643,7 @@ export default function Messenger() {
             .listen('.v1.message.created', (e: Envelope<Message>) =>
                 handlers.current.message(e.data),
             )
+            .listen('.v1.message.updated', () => handlers.current.refresh())
             .listen('.v1.message.read', () => handlers.current.refresh())
             .listen('.v1.typing', (e: Envelope<{ user_id: number }>) => {
                 if (e.data.user_id !== self.id) {
@@ -623,27 +714,44 @@ export default function Messenger() {
             uploadAbort.current?.abort();
         };
     }, []);
+    useLayoutEffect(() => {
+        const view = viewport.current;
+        if (!view || loading) return;
+        const anchor = scrollAnchor.current;
+        if (anchor && anchor.id === selectedRef.current?.id) {
+            view.scrollTop = anchor.top + view.scrollHeight - anchor.height;
+            scrollAnchor.current = null;
+        } else if (initialBottom.current || followLatest.current) {
+            view.scrollTop = view.scrollHeight;
+            initialBottom.current = false;
+        }
+    }, [messages, loading, typing]);
     useEffect(() => {
-        bottom.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages.at(-1)?.id, typing]);
+        const content = historyContent.current;
+        if (!content) return;
+        const observer = new ResizeObserver(() => {
+            if (
+                followLatest.current &&
+                !scrollAnchor.current &&
+                viewport.current
+            )
+                viewport.current.scrollTop = viewport.current.scrollHeight;
+        });
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [selected?.id, loading]);
     useEffect(() => {
         const timer = setInterval(() => {
             setSeconds(
-                call.call?.connected_at
-                    ? Math.max(
-                          0,
-                          Math.floor(
-                              (Date.now() -
-                                  Date.parse(call.call.connected_at)) /
-                                  1000,
-                          ),
-                      )
-                    : 0,
+                callSeconds(
+                    call.call?.connected_at ?? call.connectedAt,
+                    call.call?.ended_at ?? null,
+                ),
             );
             if (Date.now() - typingAt.current > 8000) setTyping(false);
         }, 1000);
         return () => clearInterval(timer);
-    }, [call.call?.connected_at]);
+    }, [call.call?.connected_at, call.connectedAt, call.call?.ended_at]);
     async function send(existing?: Message) {
         const c = selectedRef.current;
         if (!c || progress !== null) return;
@@ -674,6 +782,7 @@ export default function Messenger() {
                 created_at: new Date().toISOString(),
             };
             if (!existing) {
+                followLatest.current = true;
                 setMessages((old) => [...old, { ...pending, pending: true }]);
                 setDraft('');
                 setFiles([]);
@@ -733,13 +842,28 @@ export default function Messenger() {
         }
     }
     async function loadOlder() {
-        if (!selected || !cursor) return;
+        if (!selected || !cursor || loading || olderInFlight.current) return;
         const id = selected.id;
+        const version = requestVersion.current;
+        olderInFlight.current = true;
+        setOlderLoading(true);
         try {
             const result = await api<Page<Message>>(
                 messagesRoute.index(id, { query: { cursor } }),
             );
-            if (selectedRef.current?.id !== id) return;
+            if (
+                selectedRef.current?.id !== id ||
+                requestVersion.current !== version
+            )
+                return;
+            const view = viewport.current;
+            if (view)
+                scrollAnchor.current = {
+                    id,
+                    height: view.scrollHeight,
+                    top: view.scrollTop,
+                };
+            followLatest.current = false;
             setMessages((old) => {
                 const map = new Map(old.map((m) => [m.client_id, m]));
                 result.data.forEach((m) => map.set(m.client_id, m));
@@ -747,7 +871,12 @@ export default function Messenger() {
             });
             setCursor(result.meta?.next_cursor ?? null);
         } catch (e) {
-            fail(e);
+            if (requestVersion.current === version) fail(e);
+        } finally {
+            if (requestVersion.current === version) {
+                olderInFlight.current = false;
+                setOlderLoading(false);
+            }
         }
     }
     useEffect(() => {
@@ -876,7 +1005,9 @@ export default function Messenger() {
                                 <div>
                                     <strong>{c.peer.name}</strong>
                                     <p>
-                                        {c.latest_message?.body ||
+                                        {(c.latest_message?.deleted_at
+                                            ? 'Message deleted'
+                                            : c.latest_message?.body) ||
                                             (c.latest_message?.attachments
                                                 .length
                                                 ? 'Sent an attachment'
@@ -1070,108 +1201,200 @@ export default function Messenger() {
                                 </div>
                             </header>
                             <section
+                                ref={viewport}
+                                onScroll={(event) => {
+                                    const view = event.currentTarget;
+                                    followLatest.current =
+                                        view.scrollHeight -
+                                            view.clientHeight -
+                                            view.scrollTop <
+                                        80;
+                                    if (
+                                        !initialBottom.current &&
+                                        view.scrollTop < 120
+                                    )
+                                        void loadOlder();
+                                }}
                                 className="relay-history"
                                 aria-label="Message history"
                             >
-                                {cursor && (
-                                    <button
-                                        className="relay-secondary mx-auto"
-                                        onClick={() => void loadOlder()}
-                                    >
-                                        Load earlier messages
-                                    </button>
-                                )}
-                                {loading ? (
-                                    <div className="relay-empty">
-                                        <LoaderCircle className="animate-spin" />
-                                        Loading conversation…
-                                    </div>
-                                ) : !messages.length ? (
-                                    <div className="relay-empty">
-                                        <MessageCircle size={42} />
-                                        <h2>The start of something good.</h2>
-                                        <p>
-                                            Send{' '}
-                                            {selected.peer.name.split(' ')[0]} a
-                                            message. This conversation is just
-                                            between you two.
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="relay-date">
-                                            YOUR PRIVATE CONVERSATION
+                                <div ref={historyContent}>
+                                    {cursor && (
+                                        <button
+                                            className="relay-secondary mx-auto"
+                                            onClick={() => void loadOlder()}
+                                            disabled={olderLoading}
+                                        >
+                                            {olderLoading
+                                                ? 'Loading earlier messages…'
+                                                : 'Scroll up for earlier messages · Retry'}
+                                        </button>
+                                    )}
+                                    {loading ? (
+                                        <div className="relay-empty">
+                                            <LoaderCircle className="animate-spin" />
+                                            Loading conversation…
                                         </div>
-                                        {messages.map((m) => (
-                                            <article
-                                                className={
-                                                    'relay-message ' +
-                                                    (m.sender_id === self.id
-                                                        ? 'mine'
-                                                        : '')
-                                                }
-                                                key={m.client_id}
-                                            >
-                                                <div className="relay-bubble">
-                                                    {m.body && <p>{m.body}</p>}
-                                                    {m.attachments.map((a) => (
-                                                        <FilePreview
-                                                            key={a.id}
-                                                            attachment={a}
-                                                            onOpen={setViewer}
+                                    ) : !messages.length ? (
+                                        <div className="relay-empty">
+                                            <MessageCircle size={42} />
+                                            <h2>
+                                                The start of something good.
+                                            </h2>
+                                            <p>
+                                                Send{' '}
+                                                {
+                                                    selected.peer.name.split(
+                                                        ' ',
+                                                    )[0]
+                                                }{' '}
+                                                a message. This conversation is
+                                                just between you two.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="relay-date">
+                                                YOUR PRIVATE CONVERSATION
+                                            </div>
+                                            {messages.map((m) => (
+                                                <article
+                                                    className={
+                                                        'relay-message ' +
+                                                        (m.sender_id === self.id
+                                                            ? 'mine'
+                                                            : '')
+                                                    }
+                                                    key={m.client_id}
+                                                >
+                                                    <div className="relay-bubble">
+                                                        <MessageContent
+                                                            message={m}
+                                                            own={
+                                                                m.sender_id ===
+                                                                self.id
+                                                            }
+                                                            renderAttachment={(
+                                                                a,
+                                                            ) => (
+                                                                <FilePreview
+                                                                    attachment={
+                                                                        a
+                                                                    }
+                                                                    onOpen={
+                                                                        setViewer
+                                                                    }
+                                                                />
+                                                            )}
+                                                            onChange={(
+                                                                updated,
+                                                            ) => {
+                                                                if (
+                                                                    selectedRef
+                                                                        .current
+                                                                        ?.id !==
+                                                                    updated.conversation_id
+                                                                )
+                                                                    return;
+                                                                setMessages(
+                                                                    (old) =>
+                                                                        old.map(
+                                                                            (
+                                                                                row,
+                                                                            ) =>
+                                                                                row.id ===
+                                                                                updated.id
+                                                                                    ? updated
+                                                                                    : row,
+                                                                        ),
+                                                                );
+                                                                setViewer(
+                                                                    (
+                                                                        current,
+                                                                    ) =>
+                                                                        current &&
+                                                                        !updated.attachments.some(
+                                                                            (
+                                                                                a,
+                                                                            ) =>
+                                                                                a.id ===
+                                                                                current.id,
+                                                                        ) &&
+                                                                        m.attachments.some(
+                                                                            (
+                                                                                a,
+                                                                            ) =>
+                                                                                a.id ===
+                                                                                current.id,
+                                                                        )
+                                                                            ? null
+                                                                            : current,
+                                                                );
+                                                                void refreshConversations().catch(
+                                                                    fail,
+                                                                );
+                                                            }}
                                                         />
-                                                    ))}
-                                                </div>
-                                                <small>
-                                                    {new Date(
-                                                        m.created_at,
-                                                    ).toLocaleTimeString(
-                                                        undefined,
-                                                        {
-                                                            hour: '2-digit',
-                                                            minute: '2-digit',
-                                                        },
-                                                    )}
-                                                    {m.sender_id === self.id &&
-                                                        (m.failed ? (
-                                                            <button
-                                                                onClick={() =>
-                                                                    void send(m)
-                                                                }
-                                                            >
-                                                                Failed · Retry
-                                                            </button>
-                                                        ) : m.pending ? (
-                                                            <span>
-                                                                Sending…
-                                                            </span>
-                                                        ) : m.id <=
-                                                          selected.peer_read_id ? (
-                                                            <span>
-                                                                <CheckCheck
-                                                                    size={13}
-                                                                />
-                                                                Read
-                                                            </span>
-                                                        ) : (
-                                                            <span>
-                                                                <Check
-                                                                    size={13}
-                                                                />
-                                                                Sent
-                                                            </span>
-                                                        ))}
-                                                </small>
-                                            </article>
-                                        ))}
-                                    </>
-                                )}
-                                {typing && (
-                                    <p className="relay-muted">
-                                        {selected.peer.name} is typing…
-                                    </p>
-                                )}
-                                <div ref={bottom} />
+                                                    </div>
+                                                    <small>
+                                                        {new Date(
+                                                            m.created_at,
+                                                        ).toLocaleTimeString(
+                                                            undefined,
+                                                            {
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            },
+                                                        )}
+                                                        {m.sender_id ===
+                                                            self.id &&
+                                                            (m.failed ? (
+                                                                <button
+                                                                    onClick={() =>
+                                                                        void send(
+                                                                            m,
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    Failed ·
+                                                                    Retry
+                                                                </button>
+                                                            ) : m.pending ? (
+                                                                <span>
+                                                                    Sending…
+                                                                </span>
+                                                            ) : m.id <=
+                                                              selected.peer_read_id ? (
+                                                                <span>
+                                                                    <CheckCheck
+                                                                        size={
+                                                                            13
+                                                                        }
+                                                                    />
+                                                                    Read
+                                                                </span>
+                                                            ) : (
+                                                                <span>
+                                                                    <Check
+                                                                        size={
+                                                                            13
+                                                                        }
+                                                                    />
+                                                                    Sent
+                                                                </span>
+                                                            ))}
+                                                    </small>
+                                                </article>
+                                            ))}
+                                        </>
+                                    )}
+                                    {typing && (
+                                        <p className="relay-muted">
+                                            {selected.peer.name} is typing…
+                                        </p>
+                                    )}
+                                    <div ref={bottom} />
+                                </div>
                             </section>
                             <form
                                 className="relay-composer"
@@ -1327,7 +1550,7 @@ export default function Messenger() {
                             <div className="relay-features">
                                 <span>
                                     <Shield size={16} />
-                                    Invite only
+                                    Private workspace
                                 </span>
                                 <span>
                                     <Paperclip size={16} />
@@ -1412,7 +1635,7 @@ export default function Messenger() {
                                     ) : (
                                         <p className="relay-muted py-6">
                                             No active users found. An admin can
-                                            invite your teammates.
+                                            create accounts for your teammates.
                                         </p>
                                     )}
                                     {peopleNext && (
@@ -1673,57 +1896,62 @@ export default function Messenger() {
                                 </>
                             )}
                             {panel === 'profile' && (
-                                <form
-                                    className="relay-form"
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        const data = new FormData();
-                                        data.append('name', name);
-                                        if (avatar)
-                                            data.append('avatar', avatar);
-                                        void api<Envelope<Person>>(
-                                            profileRoute.update(),
-                                            data,
-                                        )
-                                            .then((r) => {
-                                                setSelf(r.data);
-                                                setPanel(null);
-                                            })
-                                            .catch(fail);
-                                    }}
-                                >
-                                    <Avatar person={self} />
-                                    <label>
-                                        Display name
-                                        <input
-                                            required
-                                            maxLength={100}
-                                            value={name}
-                                            onChange={(e) =>
-                                                setName(e.target.value)
-                                            }
-                                        />
-                                    </label>
-                                    <label>
-                                        Avatar (JPEG, PNG or WebP, up to 2 MB)
-                                        <input
-                                            type="file"
-                                            accept="image/jpeg,image/png,image/webp"
-                                            onChange={(e) =>
-                                                setAvatar(
-                                                    e.target.files?.[0] ?? null,
-                                                )
-                                            }
-                                        />
-                                    </label>
-                                    <button className="relay-primary">
-                                        Save profile
-                                    </button>
-                                    <p className="relay-muted">
-                                        To change your email or account status,
-                                        contact an administrator.
-                                    </p>
-                                </form>
+                                <>
+                                    <form
+                                        className="relay-form"
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            const data = new FormData();
+                                            data.append('name', name);
+                                            if (avatar)
+                                                data.append('avatar', avatar);
+                                            void api<Envelope<Person>>(
+                                                profileRoute.update(),
+                                                data,
+                                            )
+                                                .then((r) => {
+                                                    setSelf(r.data);
+                                                    setPanel(null);
+                                                })
+                                                .catch(fail);
+                                        }}
+                                    >
+                                        <Avatar person={self} />
+                                        <label>
+                                            Display name
+                                            <input
+                                                required
+                                                maxLength={100}
+                                                value={name}
+                                                onChange={(e) =>
+                                                    setName(e.target.value)
+                                                }
+                                            />
+                                        </label>
+                                        <label>
+                                            Avatar (JPEG, PNG or WebP, up to 2
+                                            MB)
+                                            <input
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                onChange={(e) =>
+                                                    setAvatar(
+                                                        e.target.files?.[0] ??
+                                                            null,
+                                                    )
+                                                }
+                                            />
+                                        </label>
+                                        <button className="relay-primary">
+                                            Save profile
+                                        </button>
+                                        <p className="relay-muted">
+                                            To change your email or account
+                                            status, contact an administrator.
+                                        </p>
+                                    </form>
+                                    <ChangePassword />
+                                </>
                             )}
                             {panel === 'admin' && (
                                 <AdminPanel
@@ -1782,10 +2010,27 @@ export default function Messenger() {
                                     ? call.call.callee_id === self.id
                                         ? 'Incoming call…'
                                         : 'Calling…'
-                                    : call.call.status}
-                                {call.call.connected_at &&
+                                    : call.call.ended_at
+                                      ? call.call.status
+                                      : call.call.connected_at ||
+                                          call.connectedAt
+                                        ? 'Connected'
+                                        : 'Connecting audio…'}
+                                {(call.call.connected_at || call.connectedAt) &&
                                     ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}
                             </p>
+                            {call.call.status === 'ringing' &&
+                                call.call.callee_id === self.id &&
+                                call.ringtoneBlocked && (
+                                    <button
+                                        className="relay-secondary"
+                                        onClick={() =>
+                                            void call.enableRingtone()
+                                        }
+                                    >
+                                        Enable incoming ringtone
+                                    </button>
+                                )}
                             {activeCall && (
                                 <div
                                     className={

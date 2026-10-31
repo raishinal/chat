@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\CallController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\PasswordController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\RealtimeController;
 use App\Http\Controllers\InvitationController;
@@ -22,6 +23,7 @@ Route::prefix('v1')->name('api.')->group(function () {
         Route::delete('tokens/current', [AuthController::class, 'revoke'])->name('tokens.destroy');
         Route::put('devices', [AuthController::class, 'device'])->name('devices.store');
         Route::post('profile', [ProfileController::class, 'update'])->name('profile.update');
+        Route::put('profile/password', [PasswordController::class, 'update'])->middleware('throttle:password-change')->name('profile.password');
         Route::get('users/{user}/avatar', [ProfileController::class, 'avatar'])->name('avatar');
         Route::get('users', [ConversationController::class, 'users'])->name('users');
         Route::get('conversations', [ConversationController::class, 'index'])->name('conversations.index');
@@ -29,10 +31,13 @@ Route::prefix('v1')->name('api.')->group(function () {
         Route::get('conversations/{conversation}', [ConversationController::class, 'show'])->name('conversations.show');
         Route::get('conversations/{conversation}/messages', [MessageController::class, 'index'])->name('messages.index');
         Route::post('conversations/{conversation}/messages', [MessageController::class, 'store'])->name('messages.store');
+        Route::patch('messages/{message}', [MessageController::class, 'update'])->name('messages.update');
+        Route::delete('messages/{message}', [MessageController::class, 'destroy'])->name('messages.destroy');
         Route::post('conversations/{conversation}/read', [ConversationController::class, 'read'])->name('conversations.read');
         Route::post('conversations/{conversation}/typing', [ConversationController::class, 'typing'])->middleware('throttle:chat-typing')->name('conversations.typing');
         Route::post('conversations/{conversation}/attachments', [AttachmentController::class, 'store'])->name('attachments.store');
         Route::get('attachments/{attachment}', [AttachmentController::class, 'show'])->name('attachments.show');
+        Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy'])->name('attachments.destroy');
         Route::get('calls', [CallController::class, 'index'])->name('calls.index');
         Route::post('conversations/{conversation}/calls', [CallController::class, 'store'])->name('calls.store');
         Route::patch('calls/{call}', [CallController::class, 'update'])->name('calls.update');
@@ -45,7 +50,7 @@ Route::prefix('v1')->name('api.')->group(function () {
         Route::get('admin/users', [AdminController::class, 'index'])->name('admin.index');
         Route::post('admin/users', [AdminController::class, 'store'])->name('admin.store');
         Route::patch('admin/users/{user}', [AdminController::class, 'update'])->name('admin.update');
-        Route::post('admin/users/{user}/invitation', [AdminController::class, 'invite'])->middleware('throttle:5,1')->name('admin.invite');
+        Route::delete('admin/users/{user}', [AdminController::class, 'destroy'])->name('admin.destroy');
         Route::post('admin/users/{user}/reset-password', [AdminController::class, 'reset'])->middleware('throttle:5,1')->name('admin.reset');
         Route::get('admin/audit', [AdminController::class, 'auditLog'])->name('admin.audit');
     });

@@ -69,7 +69,29 @@ export function releaseCallMedia(
         peer.ontrack = null;
         peer.onicecandidate = null;
         peer.onconnectionstatechange = null;
+        peer.oniceconnectionstatechange = null;
     }
     media?.getTracks().forEach((track) => track.stop());
     peer?.close();
+}
+
+/** Keep streamless audio and video tracks together instead of replacing audio. */
+export function addRemoteTrack(
+    stream: MediaStream,
+    track: MediaStreamTrack,
+): void {
+    if (!stream.getTracks().some((existing) => existing.id === track.id))
+        stream.addTrack(track);
+}
+
+export function callSeconds(
+    start: string | number | null,
+    end: string | null,
+    now = Date.now(),
+): number {
+    const from = typeof start === 'string' ? Date.parse(start) : start;
+    const to = end ? Date.parse(end) : now;
+    return from !== null && Number.isFinite(from) && Number.isFinite(to)
+        ? Math.max(0, Math.floor((to - from) / 1000))
+        : 0;
 }

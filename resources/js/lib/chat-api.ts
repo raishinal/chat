@@ -126,6 +126,8 @@ export type Message = {
     body: string | null;
     created_at: string;
     attachments: Attachment[];
+    edited_at?: string | null;
+    deleted_at?: string | null;
     pending?: boolean;
     failed?: boolean;
 };

@@ -72,9 +72,9 @@ test('local seeding supplies the requested test administrator by default', funct
     $this->assertAuthenticatedAs($admin);
 });
 
-test('production seeding rejects the short test password', function () {
+test('production seeding rejects passwords below eight characters', function () {
     $this->app['env'] = 'production';
-    config(['seeding.admin.email' => 'admin@example.com', 'seeding.admin.password' => 'password']);
+    config(['seeding.admin.email' => 'admin@example.com', 'seeding.admin.password' => 'short77']);
     expect(fn () => (new AdminSeeder)->run())->toThrow(ValidationException::class);
     $this->assertDatabaseCount('users', 0);
 });

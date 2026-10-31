@@ -10,7 +10,8 @@
         "check:fix": "vp check --fix",
         "types:check": "tsc --noEmit",
         "test:realtime-recovery": "node --experimental-strip-types --test scripts/realtime-recovery.test.mjs",
-        "test:call-media": "node --experimental-strip-types --test scripts/call-media.test.mjs"
+        "test:call-media": "node --experimental-strip-types --test scripts/call-media.test.mjs",
+        "test:call-ringback": "node --experimental-strip-types --test scripts/call-ringback.test.mjs"
     },
     "dependencies": {
         "@inertiajs/react": "^3.0.0",

@@ -16,7 +16,7 @@ export default function Invitation({
             <Head title="Accept invitation" />
             <p className="mb-6 text-sm text-muted-foreground">
                 Activate your private account for {email}. Choose a password
-                with at least 12 characters.
+                with at least 8 characters.
             </p>
             <Form {...accept.form(invitation)} className="grid gap-4">
                 {({ errors, processing }) => (
@@ -27,7 +27,7 @@ export default function Invitation({
                             <Input
                                 type="password"
                                 name="password"
-                                minLength={12}
+                                minLength={8}
                                 autoComplete="new-password"
                                 required
                             />
@@ -37,7 +37,7 @@ export default function Invitation({
                             <Input
                                 type="password"
                                 name="password_confirmation"
-                                minLength={12}
+                                minLength={8}
                                 autoComplete="new-password"
                                 required
                             />

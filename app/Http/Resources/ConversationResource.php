@@ -13,6 +13,6 @@ class ConversationResource extends JsonResource
     {
         $me = $request->user()->id;
 
-        return ['id' => $this->id, 'peer' => new UserResource($this->other($me)), 'unread_count' => $this->messages()->where('sender_id', '!=', $me)->where('id', '>', $this->readId($me))->count(), 'read_id' => $this->readId($me), 'peer_read_id' => $this->readId($this->other($me)->id), 'latest_message' => ($m = $this->messages()->with('attachments')->latest('id')->first()) ? new MessageResource($m) : null, 'updated_at' => $this->updated_at->toISOString()];
+        return ['id' => $this->id, 'peer' => new UserResource($this->other($me)), 'unread_count' => $this->messages()->whereNull('deleted_at')->where('sender_id', '!=', $me)->where('id', '>', $this->readId($me))->count(), 'read_id' => $this->readId($me), 'peer_read_id' => $this->readId($this->other($me)->id), 'latest_message' => ($m = $this->messages()->with('attachments')->latest('id')->first()) ? new MessageResource($m) : null, 'updated_at' => $this->updated_at->toISOString()];
     }
 }

@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Api;
 use App\Events\ChatEvent;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\MessageRequest;
+use App\Http\Requests\Api\MessageUpdateRequest;
 use App\Http\Resources\MessageResource;
 use App\Models\Attachment;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\MessageChanges;
 use App\Services\Notifier;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -18,6 +20,43 @@ use Illuminate\Support\Facades\Gate;
 
 class MessageController extends Controller
 {
+    public function update(MessageUpdateRequest $r, Message $message, MessageChanges $changes): MessageResource
+    {
+        DB::transaction(function () use ($r, &$message, $changes) {
+            User::whereKey($r->user()->id)->lockForUpdate()->firstOrFail();
+            $message = Message::whereKey($message->id)->lockForUpdate()->firstOrFail();
+            abort_if($message->deleted_at !== null, 409, 'Deleted messages cannot be edited.');
+            $body = $r->validated('body');
+            abort_if(blank($body) && ! $message->attachments()->exists(), 422, 'A message must contain text or an attachment.');
+            if ($message->body !== $body) {
+                $message->update(['body' => $body, 'edited_at' => now()]);
+                $changes->broadcast($message);
+            }
+        });
+
+        return new MessageResource($message->load('attachments'));
+    }
+
+    public function destroy(Request $r, Message $message, MessageChanges $changes): MessageResource
+    {
+        Gate::authorize('view', $message->conversation);
+        abort_unless($message->sender_id === $r->user()->id, 403);
+        DB::transaction(function () use ($r, &$message, $changes) {
+            User::whereKey($r->user()->id)->lockForUpdate()->firstOrFail();
+            $message = Message::whereKey($message->id)->lockForUpdate()->firstOrFail();
+            if ($message->deleted_at) {
+                return;
+            }
+            foreach ($message->attachments()->lockForUpdate()->get() as $attachment) {
+                $changes->removeAttachment($attachment);
+            }
+            $message->update(['body' => null, 'deleted_at' => now()]);
+            $changes->broadcast($message);
+        });
+
+        return new MessageResource($message->load('attachments'));
+    }
+
     /** @return AnonymousResourceCollection */
     public function index(Request $r, Conversation $conversation)
     {

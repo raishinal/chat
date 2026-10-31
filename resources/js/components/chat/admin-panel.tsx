@@ -35,6 +35,8 @@ export default function AdminPanel({
         [email, setEmail] = useState(''),
         [role, setRole] = useState('user'),
         [status, setStatus] = useState('active'),
+        [password, setPassword] = useState(''),
+        [confirmation, setConfirmation] = useState(''),
         [busy, setBusy] = useState(false),
         [audit, setAudit] = useState<
             {
@@ -63,7 +65,9 @@ export default function AdminPanel({
         setName(u?.name ?? '');
         setEmail(u?.email ?? '');
         setRole(u?.role ?? 'user');
-        setStatus(u?.status ?? 'active');
+        setStatus(u?.status === 'pending' ? 'active' : (u?.status ?? 'active'));
+        setPassword('');
+        setConfirmation('');
         setCreating(true);
         setNotice('');
     }
@@ -74,33 +78,38 @@ export default function AdminPanel({
                 name,
                 email,
                 role,
-                ...(edit && edit.status !== 'pending' ? { status } : {}),
+                ...(status !== 'pending' ? { status } : {}),
+                ...(!edit || password
+                    ? { password, password_confirmation: confirmation }
+                    : {}),
             });
             setCreating(false);
             setNotice(
-                edit ? 'User updated.' : 'Invitation queued for delivery.',
+                edit
+                    ? 'User updated.'
+                    : 'User created. They can sign in immediately.',
             );
             await load();
         } catch (e) {
             fail(e);
         } finally {
+            setPassword('');
+            setConfirmation('');
             setBusy(false);
         }
     }
-    async function perform(u: User, action: 'invite' | 'reset') {
+    async function remove(u: User) {
+        const confirmation = window.prompt(
+            `Permanently delete ${u.email}? This deletes their shared conversations, messages and files for both participants. This cannot be undone. Type the account email to confirm.`,
+        );
+        if (confirmation !== u.email) return;
         setBusy(true);
         try {
-            await api(
-                action === 'invite' ? routes.invite(u.id) : routes.reset(u.id),
-                {},
-            );
-            setNotice(
-                action === 'invite'
-                    ? 'Invitation queued for delivery.'
-                    : 'Password reset email requested.',
-            );
-        } catch (e) {
-            fail(e);
+            await api(routes.destroy(u.id), { confirmation });
+            setNotice('Account permanently deleted. File cleanup queued.');
+            await load();
+        } catch (error) {
+            fail(error);
         } finally {
             setBusy(false);
         }
@@ -125,9 +134,10 @@ export default function AdminPanel({
                 ))}
             </div>
             <p className="relay-muted">
-                Active = activated, unsuspended accounts. Pending = awaiting
-                invitation acceptance. Storage includes retained uploads.
-                Private content is visible only to participants.
+                Active = activated, unsuspended accounts. Pending = legacy
+                accounts that need a password before activation. Storage
+                includes retained uploads. Private content is visible only to
+                participants.
             </p>
             <div className="relay-admin-toolbar">
                 <label className="relay-search">
@@ -142,7 +152,7 @@ export default function AdminPanel({
                     />
                 </label>
                 <button className="relay-primary" onClick={() => start()}>
-                    Invite user
+                    Create user
                 </button>
             </div>
             {creating && (
@@ -153,7 +163,7 @@ export default function AdminPanel({
                         void save();
                     }}
                 >
-                    <h3>{edit ? 'Edit account' : 'Invite a teammate'}</h3>
+                    <h3>{edit ? 'Edit account' : 'Create user'}</h3>
                     <label>
                         Name
                         <input
@@ -182,7 +192,7 @@ export default function AdminPanel({
                             <option value="admin">Admin</option>
                         </select>
                     </label>
-                    {edit && edit.status !== 'pending' && (
+                    {edit && (
                         <label>
                             Status
                             <select
@@ -199,13 +209,49 @@ export default function AdminPanel({
                             </select>
                         </label>
                     )}
+                    <label>
+                        {edit
+                            ? 'New password (leave blank to keep current)'
+                            : 'Password'}
+                        <input
+                            type="password"
+                            autoComplete="new-password"
+                            minLength={8}
+                            required={!edit || edit.status === 'pending'}
+                            value={password}
+                            onChange={(event) =>
+                                setPassword(event.target.value)
+                            }
+                        />
+                    </label>
+                    <label>
+                        Confirm password
+                        <input
+                            type="password"
+                            autoComplete="new-password"
+                            minLength={8}
+                            required={
+                                !edit || edit.status === 'pending' || !!password
+                            }
+                            value={confirmation}
+                            onChange={(event) =>
+                                setConfirmation(event.target.value)
+                            }
+                        />
+                    </label>
+                    {edit && password && (
+                        <small>
+                            Changing the password signs this user out on all
+                            devices.
+                        </small>
+                    )}
                     <div className="flex gap-3">
                         <button className="relay-primary" disabled={busy}>
                             {busy
                                 ? 'Saving…'
                                 : edit
                                   ? 'Save account'
-                                  : 'Send invitation'}
+                                  : 'Create user'}
                         </button>
                         <button
                             type="button"
@@ -254,32 +300,12 @@ export default function AdminPanel({
                                     <button onClick={() => start(u)}>
                                         Edit
                                     </button>
-                                    {u.status === 'pending' ? (
-                                        <button
-                                            disabled={busy}
-                                            onClick={() =>
-                                                void perform(u, 'invite')
-                                            }
-                                        >
-                                            Resend invite
-                                        </button>
-                                    ) : (
-                                        <button
-                                            disabled={
-                                                busy || u.status !== 'active'
-                                            }
-                                            title={
-                                                u.status !== 'active'
-                                                    ? 'Reactivate this account first'
-                                                    : undefined
-                                            }
-                                            onClick={() =>
-                                                void perform(u, 'reset')
-                                            }
-                                        >
-                                            Reset password
-                                        </button>
-                                    )}
+                                    <button
+                                        disabled={busy || u.id === selfId}
+                                        onClick={() => void remove(u)}
+                                    >
+                                        Delete permanently
+                                    </button>
                                 </td>
                             </tr>
                         ))}

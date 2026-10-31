@@ -8,7 +8,9 @@ use App\Http\Resources\AttachmentResource;
 use App\Jobs\GenerateThumbnail;
 use App\Models\Attachment;
 use App\Models\Conversation;
+use App\Models\Message;
 use App\Models\User;
+use App\Services\MessageChanges;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +22,26 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AttachmentController extends Controller
 {
+    public function destroy(Request $r, Attachment $attachment, MessageChanges $changes): \Illuminate\Http\Response
+    {
+        Gate::authorize('view', $attachment->conversation);
+        abort_unless($attachment->user_id === $r->user()->id, 403);
+        DB::transaction(function () use ($r, $attachment, $changes) {
+            User::whereKey($r->user()->id)->lockForUpdate()->firstOrFail();
+            $attachment = Attachment::whereKey($attachment->id)->lockForUpdate()->firstOrFail();
+            $message = $attachment->message_id ? Message::whereKey($attachment->message_id)->lockForUpdate()->firstOrFail() : null;
+            $changes->removeAttachment($attachment);
+            if ($message) {
+                if (blank($message->body) && ! $message->attachments()->exists()) {
+                    $message->update(['deleted_at' => now(), 'body' => null]);
+                }
+                $changes->broadcast($message);
+            }
+        });
+
+        return response()->noContent();
+    }
+
     /** @return AnonymousResourceCollection */
     public function store(UploadRequest $r, Conversation $conversation)
     {

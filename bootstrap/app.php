@@ -18,6 +18,8 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+        // SDP is a wire format: trimming its final CRLF breaks WebRTC parsing.
+        $middleware->trimStrings(except: ['payload.sdp']);
         $middleware->alias(['active' => ActiveAccount::class]);
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 

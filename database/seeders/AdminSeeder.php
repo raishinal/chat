@@ -32,7 +32,7 @@ class AdminSeeder extends Seeder
         ], [
             'name' => ['required', 'string', 'max:100'],
             'email' => ['required', 'email', 'max:254'],
-            'password' => ['required', 'string', Password::min($local ? 8 : 12)],
+            'password' => ['required', 'string', Password::min(8)],
         ])->validate();
 
         $existing = User::where('email', $attributes['email'])->first();

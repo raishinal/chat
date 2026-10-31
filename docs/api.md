@@ -8,7 +8,7 @@ Web: `GET /sanctum/csrf-cookie`, `POST /login` with email/password, then use ses
 
 Native: `POST /tokens` accepts `{email,password,device_name}` and returns `{token,user}`. Send the bearer token on all protected requests, including Pusher authorization. It expires after 30 days. `DELETE /tokens/current` revokes only the presented token (204). Cookie clients use web logout. `GET /me` returns `{data: User}`.
 
-`POST /forgot-password` accepts `{email}` and returns a generic eligibility message. Native clients complete reset using `POST /api/v1/reset-password` (minimum 12 characters); the website uses Fortify `POST /reset-password` with `{email,token,password,password_confirmation}` and `Accept: application/json`; native callers do not need a session cookie. `POST /invitations/{invitation}/accept` accepts `{token,password,password_confirmation}` (password at least 12 characters) and returns an activation message; used/expired/replaced links return 410.
+`POST /forgot-password` accepts `{email}` and returns a generic eligibility message. Native clients complete reset using `POST /api/v1/reset-password` (minimum 8 characters); the website uses Fortify `POST /reset-password` with `{email,token,password,password_confirmation}` and `Accept: application/json`; native callers do not need a session cookie. `POST /invitations/{invitation}/accept` accepts `{token,password,password_confirmation}` (password at least 8 characters) and returns an activation message; used/expired/replaced links return 410.
 
 Errors use Laravel JSON `{message,errors?:{field:[message,…]}}`: 401 unauthenticated; 403 role/membership/inactive account forbidden; 404 absent or not owned; 409 duplicate client ID in another conversation, busy or invalid call transition; 410 expired invitation; 413 proxy/PHP request too large; 416 invalid Range (with `Content-Range: bytes */size`); 419 CSRF/session expired; 422 validation/quota; 429 rate limit; 503 service unavailable. Retry idempotent sends with the **same** client UUID; use a fresh UUID for genuinely new messages. Generic reverse-proxy errors may not be JSON.
 
@@ -27,6 +27,7 @@ Attachment = {
 Message = {
  id: number; conversation_id: number; sender_id: number; client_id: string;
  body: string|null; created_at: string; attachments: Attachment[];
+ edited_at: string|null; deleted_at: string|null;
 }
 Conversation = {
  id: number; peer: User; unread_count: number; read_id: number;
@@ -78,13 +79,13 @@ All routes below require an active authenticated account unless explicitly ident
 | POST `/pusher/user-auth`                         | `{socket_id}`                                                 | Pusher authenticated-user JSON                                        |
 | PUT `/devices`                                   | `{device_id: UUID,platform:'web'                              | 'ios'                                                                 | 'android',push_token?:string}`                          | 201 `{push_delivery_enabled:false}` |
 | GET `/admin/users`                               | `q?`, `page?`                                                 | `{metrics:{total,active,pending,suspended,storage_bytes},users:page}` |
-| POST `/admin/users`                              | `{name,email,role}`                                           | 201 `{data: admin user row}`, queued invitation                       |
-| PATCH `/admin/users/{user}`                      | `{name,email,role,status?:'active'                            | 'suspended'}`                                                         | `{data: admin user row}`                                |
-| POST `/admin/users/{user}/invitation`            | `{}`                                                          | 204; pending users only                                               |
+| POST `/admin/users`                              | `{name,email,role,password,password_confirmation,status?}`    | 201 active user; password at least 8 characters, no invitation        |
+| PATCH `/admin/users/{user}`                      | `{name,email,role,status?,password?,password_confirmation?}`  | Updated user; optional password revokes sessions/tokens               |
+| DELETE `/admin/users/{user}`                     | `{confirmation: account email}`                               | 204; account and shared chat history removed, file cleanup queued     |
 | POST `/admin/users/{user}/reset-password`        | `{}`                                                          | 204; active users only                                                |
 | GET `/admin/audit`                               | `page?`                                                       | audit page, 30/page                                                   |
 
-The six admin routes enforce the admin role. All admin actions write actor_id, subject_id, action, created_at and updated_at to `audit_logs`. Pending accounts cannot be activated directly by admins. They must consume their invitation. An admin cannot suspend themselves or demote/suspend the last active admin.
+Admin routes require the admin role. Creation assigns a confirmed password and activates immediately. Password edits revoke that user’s tokens/sessions. Legacy pending accounts require a password before activation. Admins cannot suspend/delete themselves or demote/suspend/delete the last active admin. Permanent deletion removes shared conversations and files for both participants; file deletion runs after commit through the queue. Audit subject references become null after deletion.
 
 Messages need text, at least one attachment, or both. Body limit 4000 characters; message attachment count defaults to five. Only uploads staged by the sender in the same conversation can be claimed. Once claimed they cannot be reused for a new message. A successful retry returns the existing resource, without creating another notification or broadcast. Original filenames are display-only.
 
@@ -131,3 +132,15 @@ Device registration is an integration contract, not a working push service. The 
 ### Cloudflare connectivity credentials
 
 `GET /api/v1/ice-servers` uses the same active-account Sanctum cookie/bearer authentication as calls. It permits 10 requests/minute/account and returns `Cache-Control: private, no-store, max-age=0`. Each successful request generates new short-lived Cloudflare STUN/TURN configuration. `expires_in` is the server-configured TTL (default 3600 seconds, clamped to 60..86400); `expires_at` is a conservative UTC expiry based on the issuance request start. Clients cannot select TTL or provider keys. Missing configuration, timeout, upstream failure or malformed provider responses return sanitized 503 errors; do not silently continue with STUN-only connectivity. Temporary credentials remain in memory, outside Pusher events, logs and persistent client storage. Fetch for both outgoing initiation and incoming acceptance, before constructing `RTCPeerConnection`. [Setup and native helper](cloudflare-turn.md).
+
+`PUT /api/v1/profile/password` requires `{current_password,password,password_confirmation}` and active authentication. Passwords must be different and at least 8 characters. Returns `{message}`; retains the current bearer token or browser session, revokes others and invalidates reset links. Limited to six attempts per account per minute.
+
+### Message editing and deletion
+
+`PATCH /messages/{message}` accepts `{body: string|null}` (4000 characters maximum). Only the sender may edit; text may be cleared when attachments remain. Returns `{data: Message}` with `edited_at`. Editing a deleted message returns 409.
+
+`DELETE /messages/{message}` is sender-only and returns `{data: Message}`. Text and attachments are removed for both participants. The message ID/client ID remain as a tombstone with `deleted_at`, null body and empty attachments, preserving pagination, read cursors and send retry safety. Repeated deletion succeeds.
+
+`DELETE /attachments/{attachment}` is uploader-only, works for staged and sent files, and returns 204. The original file and thumbnail are queued for deletion after commit; authenticated downloads immediately return 404. Removing the final attachment of a message without text marks the empty message deleted.
+
+`Message` includes nullable ISO timestamps `edited_at` and `deleted_at`. `v1.message.updated` broadcasts `{id,conversation_id}` on the conversation channel for edits, message deletion and sent-file deletion; both users also receive `v1.conversation.updated`. Refetch the loaded history on this event and after reconnect/polling to reconcile changes to older messages, including tombstones.

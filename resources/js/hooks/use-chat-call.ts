@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type Call } from '@/lib/chat-api';
 import { store, update, signal as signalRoute } from '@/routes/api/calls';
 import { ice } from '@/routes/api';
-import { acquireCallMedia, releaseCallMedia } from '@/lib/call-media';
+import {
+    acquireCallMedia,
+    releaseCallMedia,
+    addRemoteTrack,
+} from '@/lib/call-media';
+import { createCallRingback } from '@/lib/call-ringback';
 export type Signal = {
     call_id: number;
     type: 'offer' | 'answer' | 'ice';
@@ -20,6 +25,8 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         [cameraAvailable, setCameraAvailable] = useState(false),
         [ending, setEnding] = useState(false),
         [accepting, setAccepting] = useState(false),
+        [ringtoneBlocked, setRingtoneBlocked] = useState(false),
+        [connectedAt, setConnectedAt] = useState<number | null>(null),
         [endError, setEndError] = useState('');
     const current = useRef<Call | null>(null),
         pc = useRef<RTCPeerConnection | null>(null),
@@ -32,6 +39,11 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             >(),
         ),
         offered = useRef(false),
+        remoteStream = useRef<MediaStream | null>(null),
+        signalQueue = useRef(Promise.resolve()),
+        connectedReported = useRef(false),
+        ringback = useRef<ReturnType<typeof createCallRingback> | null>(null),
+        ringtone = useRef<ReturnType<typeof createCallRingback> | null>(null),
         preparing = useRef<Promise<RTCPeerConnection> | null>(null),
         generation = useRef(0),
         mediaAbort = useRef<AbortController | null>(null),
@@ -41,6 +53,8 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         pendingEnd = useRef<{ id: number; action: string } | null>(null),
         closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     function cleanup() {
+        ringtone.current?.stop();
+        ringback.current?.stop();
         generation.current++;
         mediaAbort.current?.abort();
         mediaAbort.current = null;
@@ -49,6 +63,8 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         stream.current = null;
         setLocal(null);
         setRemote(null);
+        remoteStream.current = null;
+        connectedReported.current = false;
         candidates.current = [];
         chunks.current.clear();
         offered.current = false;
@@ -141,6 +157,9 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             !next.ended_at
         )
             return;
+        if (current.current?.id !== next.id) setConnectedAt(null);
+        if (next.status !== 'ringing' || next.ended_at)
+            ringback.current?.stop();
         current.current = next;
         setCall(next);
         if (next.ended_at) {
@@ -190,8 +209,13 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             media.getTracks().forEach((t) => peer.addTrack(t, media));
             if (c.kind === 'video' && !hasCamera)
                 peer.addTransceiver('video', { direction: 'recvonly' });
-            peer.ontrack = (e) =>
-                setRemote(e.streams[0] ?? new MediaStream([e.track]));
+            peer.ontrack = (e) => {
+                if (gen !== generation.current) return;
+                remoteStream.current ??= new MediaStream();
+                addRemoteTrack(remoteStream.current, e.track);
+                // A fresh wrapper also updates the player when another track arrives.
+                setRemote(new MediaStream(remoteStream.current.getTracks()));
+            };
             peer.onicecandidate = (e) => {
                 if (e.candidate)
                     void api(signalRoute(c.id), {
@@ -201,20 +225,45 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                         if (!locallyEnded.current.has(c.id)) onError(e.message);
                     });
             };
-            peer.onconnectionstatechange = () => {
-                if (peer.connectionState === 'connected')
-                    void action('connected', c.id).catch((e) =>
-                        onError(e.message),
+            const connectionChanged = () => {
+                if (
+                    gen !== generation.current ||
+                    locallyEnded.current.has(c.id)
+                )
+                    return;
+                if (
+                    peer.connectionState === 'connected' ||
+                    ['connected', 'completed'].includes(peer.iceConnectionState)
+                ) {
+                    setConnectedAt((previous) => previous ?? Date.now());
+                    ringback.current?.stop();
+                    if (!connectedReported.current) {
+                        connectedReported.current = true;
+                        void action('connected', c.id).catch((e) => {
+                            connectedReported.current = false;
+                            if (!locallyEnded.current.has(c.id))
+                                onError(e.message);
+                        });
+                    }
+                }
+                if (
+                    peer.connectionState === 'failed' ||
+                    peer.iceConnectionState === 'failed'
+                ) {
+                    onError(
+                        'Call audio could not connect. Check both networks and the Cloudflare TURN configuration, then redial.',
                     );
-                if (peer.connectionState === 'failed')
                     void action('failed', c.id).catch((e) =>
                         onError(e.message),
                     );
+                }
                 if (peer.connectionState === 'disconnected')
                     onError(
                         'Call connection interrupted. Attempting to recover; the call expires if connectivity does not return.',
                     );
             };
+            peer.onconnectionstatechange = connectionChanged;
+            peer.oniceconnectionstatechange = connectionChanged;
             return peer;
         })();
         preparing.current = promise;
@@ -225,6 +274,9 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         }
     }
     async function start(conversation: number, kind: 'audio' | 'video') {
+        ringback.current ??= createCallRingback();
+        void ringback.current.unlock();
+        setConnectedAt(null);
         let startedId: number | null = null;
         setEndError('');
         try {
@@ -246,9 +298,11 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         }
     }
     async function accept() {
+        ringtone.current?.stop();
         const incoming = current.current;
         if (!incoming || incoming.ended_at || accepting) return;
         setAccepting(true);
+        setConnectedAt(null);
         try {
             await prepare(incoming);
             if (
@@ -265,7 +319,14 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             setAccepting(false);
         }
     }
-    async function handleSignal(s: Signal) {
+    function handleSignal(s: Signal) {
+        const queuedGeneration = generation.current;
+        signalQueue.current = signalQueue.current.then(async () => {
+            if (queuedGeneration === generation.current) await processSignal(s);
+        });
+        return signalQueue.current;
+    }
+    async function processSignal(s: Signal) {
         if (s.call_id !== current.current?.id || current.current.ended_at)
             return;
         try {
@@ -309,6 +370,51 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         }
     }
     useEffect(() => {
+        const unlock = () => {
+            ringtone.current ??= createCallRingback(undefined, true);
+            void ringtone.current
+                .unlock()
+                .then((ready) => setRingtoneBlocked(!ready));
+        };
+        document.addEventListener('pointerdown', unlock);
+        document.addEventListener('keydown', unlock);
+        return () => {
+            document.removeEventListener('pointerdown', unlock);
+            document.removeEventListener('keydown', unlock);
+        };
+    }, []);
+    useEffect(() => {
+        if (
+            call?.status !== 'ringing' ||
+            call.callee_id !== me ||
+            call.ended_at ||
+            accepting
+        ) {
+            ringtone.current?.stop();
+            return;
+        }
+        let active = true;
+        ringtone.current ??= createCallRingback(undefined, true);
+        ringtone.current.start();
+        setRingtoneBlocked(!ringtone.current.isReady());
+        void ringtone.current.unlock().then((ready) => {
+            if (active) setRingtoneBlocked(!ready);
+        });
+        return () => {
+            active = false;
+            ringtone.current?.stop();
+        };
+    }, [call?.id, call?.status, call?.ended_at, me, accepting]);
+    useEffect(() => {
+        if (
+            call?.status === 'ringing' &&
+            call.caller_id === me &&
+            !call.ended_at
+        )
+            ringback.current?.start();
+        else ringback.current?.stop();
+    }, [call?.id, call?.status, call?.ended_at, me]);
+    useEffect(() => {
         if (
             call?.status === 'accepted' &&
             call.caller_id === me &&
@@ -345,17 +451,21 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                     });
                 });
             else if (c && ['accepted', 'connected'].includes(c.status))
-                void action('heartbeat').catch((e) => {
+                void action(
+                    connectedAt && !c.connected_at ? 'connected' : 'heartbeat',
+                ).catch((e) => {
                     if (!locallyEnded.current.has(c.id))
                         onError((e as Error).message);
                 });
         }, 20000);
         return () => clearInterval(timer);
-    }, [call?.id, call?.ended_at]);
+    }, [call?.id, call?.ended_at, connectedAt]);
     useEffect(
         () => () => {
             generation.current++;
             mediaAbort.current?.abort();
+            ringback.current?.dispose();
+            ringtone.current?.dispose();
             if (closeTimer.current) clearTimeout(closeTimer.current);
             releaseCallMedia(pc.current, stream.current);
         },
@@ -370,6 +480,21 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         cameraAvailable,
         ending,
         accepting,
+        ringtoneBlocked,
+        enableRingtone: async () => {
+            ringtone.current ??= createCallRingback(undefined, true);
+            const ready = await ringtone.current.unlock();
+            setRingtoneBlocked(!ready);
+            if (
+                ready &&
+                current.current?.status === 'ringing' &&
+                current.current.callee_id === me
+            ) {
+                ringtone.current.stop();
+                ringtone.current.start();
+            }
+        },
+        connectedAt,
         endError,
         retryEnd: () => {
             const pending = pendingEnd.current;

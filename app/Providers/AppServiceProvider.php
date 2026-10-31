@@ -30,6 +30,7 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('chat-api', fn (Request $request) => Limit::perMinute(120)->by((string) $request->user()->id));
         RateLimiter::for('chat-typing', fn (Request $request) => Limit::perMinute(12)->by($request->user()->id.':'.$request->route()->originalParameter('conversation')));
         RateLimiter::for('turn-credentials', fn (Request $request) => Limit::perMinute(10)->by((string) $request->user()->id));
+        RateLimiter::for('password-change', fn (Request $request) => Limit::perMinute(6)->by((string) $request->user()->id));
         require base_path('routes/channels.php');
     }
 
@@ -45,7 +46,7 @@ class AppServiceProvider extends ServiceProvider
         );
 
         Password::defaults(fn (): ?Password => app()->isProduction()
-            ? Password::min(12)
+            ? Password::min(8)
                 ->mixedCase()
                 ->letters()
                 ->numbers()

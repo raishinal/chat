@@ -1,6 +1,6 @@
 # Relay — private team chat
 
-An invite-only Laravel 13 / React 19 / TypeScript application built on the existing Inertia 3 starter. REST endpoints live at `/api/v1`; React Native is deliberately not implemented. No public registration routes or page exist.
+A private Laravel 13 / React 19 / TypeScript application built on the existing Inertia 3 starter, with an adjacent React Native client. REST endpoints live at `/api/v1`. Administrators create active users directly with an assigned password; no invitation is sent. No public registration routes or page exist.
 
 ## Install and start
 
@@ -18,7 +18,7 @@ npm run build
 php artisan serve --host=127.0.0.1 --port=8000
 ```
 
-The admin command requests and confirms a hidden password (minimum 12 characters). The interactive command has no default credentials. Log in at `http://127.0.0.1:8000`. In development, `npm run dev` may replace the build step. Run these in separate terminals:
+The admin command requests and confirms a hidden password (minimum 8 characters). The interactive command has no default credentials. Log in at `http://127.0.0.1:8000`. In development, `npm run dev` may replace the build step. Run these in separate terminals:
 
 ```powershell
 php artisan queue:work --tries=3 --timeout=90
@@ -32,7 +32,7 @@ For local testing, simply run `php artisan db:seed --class=AdminSeeder` to creat
 ```dotenv
 SEED_ADMIN_NAME="Workspace Admin"
 SEED_ADMIN_EMAIL=your-admin@example.com
-SEED_ADMIN_PASSWORD="your-own-unique-password-at-least-12-characters"
+SEED_ADMIN_PASSWORD="your-own-unique-password-at-least-8-characters"
 ```
 
 Then run:
@@ -42,7 +42,7 @@ php artisan config:clear
 php artisan db:seed --class=AdminSeeder
 ```
 
-`AdminSeeder` is also called by `php artisan db:seed`. It creates a verified, active administrator with a hashed password. With `APP_ENV=local` and both email/password blank, it creates the testing account `admin@example.com` / `password`. Outside local development, blank credentials skip admin creation and explicitly configured passwords require at least 12 characters. Invalid or incomplete credentials fail validation. Rerunning leaves an existing admin's password, role, name and suspension status unchanged; an email belonging to a non-admin is rejected rather than promoted. Remove `SEED_ADMIN_PASSWORD` after provisioning and clear/rebuild the config cache so it no longer retains the secret. Use the interactive `chat:admin` command if you prefer not to configure a password in the environment. In production, run the explicit admin seeder with `--force` after supplying credentials through your secret manager; demo users remain local-only.
+`AdminSeeder` is also called by `php artisan db:seed`. It creates a verified, active administrator with a hashed password. With `APP_ENV=local` and both email/password blank, it creates the testing account `admin@example.com` / `password`. Outside local development, blank credentials skip admin creation and explicitly configured passwords require at least 8 characters. Invalid or incomplete credentials fail validation. Rerunning leaves an existing admin's password, role, name and suspension status unchanged; an email belonging to a non-admin is rejected rather than promoted. Remove `SEED_ADMIN_PASSWORD` after provisioning and clear/rebuild the config cache so it no longer retains the secret. Use the interactive `chat:admin` command if you prefer not to configure a password in the environment. In production, run the explicit admin seeder with `--force` after supplying credentials through your secret manager; demo users remain local-only.
 
 Optional local demo users:
 
@@ -50,7 +50,7 @@ Optional local demo users:
 php artisan db:seed
 ```
 
-The demo-user portion only runs under `APP_ENV=local`, prints freshly generated passwords once, and adds four ordinary users. The configured admin seeder runs first in every environment. Never create demo users in production. Existing demo accounts are not modified. To create two test accounts without mail, run `chat:admin` twice locally; use admin invitations for normal membership. This checkout's existing `.env` points at MySQL; use its database credentials and create the database first, or intentionally change `DB_CONNECTION=sqlite` and remove `DB_DATABASE` for the default SQLite path. The implementation does not overwrite existing environment settings.
+The demo-user portion only runs under `APP_ENV=local`, prints freshly generated passwords once, and adds four ordinary users. The configured admin seeder runs first in every environment. Never create demo users in production. Existing demo accounts are not modified. To create two test accounts without mail, run `chat:admin` twice locally; use Administration → Create user for normal membership. This checkout's existing `.env` points at MySQL; use its database credentials and create the database first, or intentionally change `DB_CONNECTION=sqlite` and remove `DB_DATABASE` for the default SQLite path. The implementation does not overwrite existing environment settings.
 
 ## External services
 
@@ -116,6 +116,17 @@ API and event contracts: [docs/api.md](docs/api.md).
 
 Video calls require a working microphone, but the camera is optional. Camera absence, permission denial, a busy camera or allocation failure continues with audio and a blank local video placeholder. Remote video can still be received. The camera button is disabled when no camera track is available. Microphone failure blocks call setup with an actionable message. `npm run test:call-media` verifies acquisition fallback and cancellation using simulated devices; it does not verify actual WebRTC media connectivity.
 
+Call audio uses a dedicated remote audio player with an Enable call audio button if browser autoplay is blocked; video previews stay muted to avoid duplicate playback. Remote tracks are aggregated and incoming signaling is processed in order. The timer starts from WebRTC media/ICE connection, uses the server timestamp when available, and freezes on hang-up. Outgoing calls play locally synthesized ringback until acceptance or termination. `npm run test:call-ringback` verifies tone lifecycle with simulated audio nodes. Verify actual two-way audio and ringback between separate devices; acceptance alone does not confirm a media connection.
+
 Hang-up stops local media immediately, disables repeated submissions and briefly shows Ending call before closing after server confirmation. Failed synchronization leaves media off and offers Retry hang-up; the call lease still provides eventual cleanup if the server cannot be reached. Late signals/heartbeats cannot reopen a locally ended or dismissed call. Repeated terminal cleanup requests return the existing history record without duplicate events.
 
 Idle-tab recovery: returning to a tab, restoring the network or the periodic foreground check validates the session, reconnects stale/unavailable Pusher connections, retries failed subscriptions and reconciles missed API state. Wake events share a single session check with a five-second cooldown. Transient connection notices clear after recovery; they are separate from message/upload errors. Expired or disabled accounts stop recovery and show Sign in instead of repeatedly reconnecting. `npm run test:realtime-recovery` tests simulated sleep, network recovery, subscription retry, expiry, event coalescing and cleanup. These tests do not simulate real OS sleep or prove delivery over a live interrupted WebSocket.
+
+User management: Administration → Create user requires name, email, role and a confirmed password of at least 8 characters. Accounts are active immediately. Edit lets admins assign a new confirmed password; leaving it blank preserves the password. Assigning a password revokes that account’s sessions/tokens. Profile settings → Change password requires the current password and retains only the current device’s session/token.
+
+Delete permanently requires typing the account email and removes the account plus its shared conversations/messages/attachments for both participants. The UI states this consequence. Self-deletion and removal of the last active admin are blocked. Storage objects and thumbnails are deleted by the retryable `DeleteAccountFiles` queue job after database commit; keep the queue worker running. Deletion updates are broadcast to remaining participants. Audit records remain with a null deleted subject reference.
+
+Chat history opens at the latest message. Scrolling upward automatically requests older cursor pages and preserves the visible position while prepending. New messages follow the bottom only while you are near the latest messages; sending your own message returns to the latest. The native inverted list supports the same behavior.
+
+
+Call/notification sound update: incoming web calls use a louder repeating double ring, outgoing ringback is louder, and message/missed-call chimes use increased gain. Browser interaction unlocks audio; an incoming call shows Enable incoming ringtone if playback is blocked. Ringtones stop on acceptance, rejection, cancellation, expiry and cleanup. Device volume and browser autoplay controls still apply. Automated tests cover incoming tone scheduling, immediate stop and stopping while audio unlock is pending; audible output needs a device check.

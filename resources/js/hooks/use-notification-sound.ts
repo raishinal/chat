@@ -50,7 +50,7 @@ export function useNotificationSound() {
             oscillator.type = 'sine';
             oscillator.frequency.setValueAtTime(frequency, start);
             gain.gain.setValueAtTime(0, start);
-            gain.gain.linearRampToValueAtTime(0.035, start + 0.012);
+            gain.gain.linearRampToValueAtTime(0.16, start + 0.012);
             gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
             oscillator.connect(gain);
             gain.connect(audio.destination);

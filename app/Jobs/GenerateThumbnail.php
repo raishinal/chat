@@ -26,6 +26,9 @@ class GenerateThumbnail implements ShouldQueue
         }
         $disk = Storage::disk($a->disk);
         $bytes = $disk->get($a->path);
+        if (! is_string($bytes)) {
+            return;
+        }
         $info = @getimagesizefromstring($bytes);
         if (! $info || $info[0] * $info[1] > 16000000) {
             return;
@@ -45,7 +48,9 @@ class GenerateThumbnail implements ShouldQueue
             $data = ob_get_clean();
             $path = $a->path.'.thumb.jpg';
             $disk->put($path, $data);
-            $a->update(['thumbnail_path' => $path]);
+            if (! Attachment::whereKey($a->id)->update(['thumbnail_path' => $path]) && ! Attachment::whereKey($a->id)->exists()) {
+                $disk->delete($path);
+            }
             imagedestroy($thumb);
         } finally {
             imagedestroy($image);

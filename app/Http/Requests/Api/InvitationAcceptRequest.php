@@ -10,6 +10,6 @@ class InvitationAcceptRequest extends FormRequest
     /** @return array<string, mixed> */
     public function rules(): array
     {
-        return ['token' => 'required|string', 'password' => ['required', 'confirmed', Password::min(12)]];
+        return ['token' => 'required|string', 'password' => ['required', 'confirmed', Password::min(8)]];
     }
 }

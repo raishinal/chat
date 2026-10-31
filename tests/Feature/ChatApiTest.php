@@ -52,24 +52,21 @@ test('mobile login enforces account status and tokens can be revoked', function 
     $this->postJson('/api/v1/tokens', ['email' => $u->email, 'password' => 'password', 'device_name' => 'test'])->assertUnprocessable();
     $this->post('/login', ['email' => $u->email, 'password' => 'password'])->assertSessionHasErrors('email');
 });
-test('only admins can invite users and invitation activates exactly once', function () {
+test('only admins can directly create active users with a password', function () {
     Notification::fake();
-    $member = User::factory()->create();
-    $this->actingAs($member)->postJson('/api/v1/admin/users', ['name' => 'Invitee', 'email' => 'invite@example.test', 'role' => 'user'])->assertForbidden();
+    $payload = ['name' => 'New member', 'email' => 'direct@example.test', 'role' => 'user', 'password' => 'long-safe-password', 'password_confirmation' => 'long-safe-password'];
+    $this->actingAs(User::factory()->create())->postJson('/api/v1/admin/users', $payload)->assertForbidden();
     $a = admin();
-    $id = $this->actingAs($a)->postJson('/api/v1/admin/users', ['name' => 'Invitee', 'email' => 'invite@example.test', 'role' => 'user'])->assertCreated()->json('data.id');
+    $id = $this->actingAs($a)->postJson('/api/v1/admin/users', $payload)->assertCreated()->assertJsonMissingPath('data.password')->json('data.id');
     $u = User::findOrFail($id);
-    expect($u->status)->toBe('pending');
-    Notification::assertSentTo($u, AccountInvitation::class);
-    $url = Notification::sent($u, AccountInvitation::class)->first()->url;
-    parse_str(parse_url($url, PHP_URL_QUERY), $query);
-    $i = Invitation::where('user_id', $id)->firstOrFail();
-    $payload = ['token' => $query['token'], 'password' => 'long-safe-password', 'password_confirmation' => 'long-safe-password'];
-    $this->postJson('/api/v1/invitations/'.$i->id.'/accept', $payload)->assertOk();
-    expect($u->fresh()->status)->toBe('active');
-    $this->postJson('/api/v1/invitations/'.$i->id.'/accept', $payload)->assertStatus(410);
-    $this->assertDatabaseHas('audit_logs', ['actor_id' => $a->id, 'subject_id' => $id, 'action' => 'user.invited']);
+    expect($u->status)->toBe('active');
+    expect(Hash::check('long-safe-password', $u->password))->toBeTrue();
+    expect($u->email_verified_at)->not->toBeNull();
+    Notification::assertNothingSent();
+    $this->assertDatabaseMissing('invitations', ['user_id' => $id]);
+    $this->assertDatabaseHas('audit_logs', ['actor_id' => $a->id, 'subject_id' => $id, 'action' => 'user.created']);
 });
+
 test('expired and replaced invitation secrets cannot activate accounts', function () {
     Notification::fake();
     $u = User::factory()->create(['email' => 'pending@example.test']);
@@ -241,6 +238,32 @@ test('signaling validates participants roles and payloads without persisting SDP
     Event::assertDispatched(SignalEvent::class);
     expect(Message::count())->toBe(0);
 });
+test('signaling preserves SDP line endings through every broadcast chunk', function (string $type) {
+    [$a, $b, $conversation] = pair();
+    $call = Call::create(['conversation_id' => $conversation->id, 'caller_id' => $a->id, 'callee_id' => $b->id, 'kind' => 'video', 'status' => 'accepted', 'expires_at' => now()->addMinute()]);
+    config(['broadcasting.default' => 'pusher']);
+    Event::fake([SignalEvent::class]);
+    $sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+        .str_repeat("a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid\r\n", 150)
+        ."a=ssrc:1881753626 msid:b2932270-5aa7-4116-a695-ea423b4402e9 bcdec864-d9c9-4745-8036-603ef3c40a8e\r\n";
+    $payload = ['type' => $type, 'sdp' => $sdp];
+
+    $this->actingAs($type === 'offer' ? $a : $b)
+        ->postJson('/api/v1/calls/'.$call->id.'/signal', ['type' => $type, 'payload' => $payload])
+        ->assertNoContent();
+
+    $events = Event::dispatched(SignalEvent::class);
+    expect($events->count())->toBeGreaterThan(1);
+    $chunks = [];
+    foreach ($events as [$event]) {
+        $data = $event->broadcastWith()['data'];
+        $chunks[$data['index']] = $data['chunk'];
+    }
+    ksort($chunks);
+    $received = json_decode(base64_decode(implode('', $chunks), true), true, flags: JSON_THROW_ON_ERROR);
+    expect($received)->toBe($payload);
+})->with(['offer', 'answer']);
+
 test('actual private and presence auth endpoints reject outsiders', function () {
     [$a,$b,$c] = pair();
     config(['broadcasting.default' => 'pusher', 'broadcasting.connections.pusher.key' => 'test-key', 'broadcasting.connections.pusher.secret' => 'test-secret', 'broadcasting.connections.pusher.app_id' => 'test-app']);

@@ -17,8 +17,8 @@ class CreateAdmin extends Command
     {
         $email = strtolower($this->argument('email') ?: $this->ask('Email'));
         $name = $this->option('name') ?: $this->ask('Name');
-        $password = $this->secret('Password (at least 12 characters)');
-        $v = Validator::make(compact('email', 'name', 'password'), ['email' => 'required|email|unique:users', 'name' => 'required|string|max:100', 'password' => ['required', Password::min(12)]]);
+        $password = $this->secret('Password (at least 8 characters)');
+        $v = Validator::make(compact('email', 'name', 'password'), ['email' => 'required|email|unique:users', 'name' => 'required|string|max:100', 'password' => ['required', Password::min(8)]]);
         if ($v->fails()) {
             $this->error($v->errors()->first());
 

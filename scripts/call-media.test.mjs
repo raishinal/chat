@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
     acquireCallMedia,
     releaseCallMedia,
+    addRemoteTrack,
+    callSeconds,
 } from '../resources/js/lib/call-media.ts';
 function track(kind) {
     return {
@@ -21,6 +23,25 @@ function stream(...tracks) {
         addTrack: (t) => tracks.push(t),
     };
 }
+
+await test('a streamless video track does not replace remote audio and duplicate tracks are ignored', () => {
+    const mic = { ...track('audio'), id: 'remote-audio' };
+    const camera = { ...track('video'), id: 'remote-video' };
+    const remote = stream();
+    addRemoteTrack(remote, mic);
+    addRemoteTrack(remote, camera);
+    addRemoteTrack(remote, mic);
+    assert.deepEqual(remote.getTracks(), [mic, camera]);
+});
+
+await test('call timer advances from local media connection before server status arrives and freezes on hangup', () => {
+    assert.equal(callSeconds(null, null, 12000), 0);
+    assert.equal(callSeconds(10000, null, 12500), 2);
+    assert.equal(callSeconds('1970-01-01T00:00:10.000Z', null, 15000), 5);
+    assert.equal(callSeconds(10000, '1970-01-01T00:00:14.000Z', 90000), 4);
+    assert.equal(callSeconds('invalid', null, 12000), 0);
+    assert.equal(callSeconds(20000, null, 12000), 0);
+});
 
 await test('camera allocation failure preserves a live mandatory microphone', async () => {
     const mic = track('audio');
