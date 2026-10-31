@@ -1,0 +1,1029 @@
+.relay {
+    --paper: #fbfaf7;
+    --ink: #183d38;
+    --line: #e4e9e4;
+    --muted: #6d7f78;
+    display: flex;
+    height: 100dvh;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 14px;
+}
+.relay button,
+.relay a,
+.relay label:has(input[type='file']) {
+    cursor: pointer;
+}
+.relay button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.relay button:focus-visible,
+.relay a:focus-visible,
+.relay input:focus-visible,
+.relay textarea:focus-visible,
+.relay select:focus-visible {
+    outline: 3px solid #d5a84d;
+    outline-offset: 3px;
+}
+.relay-rail {
+    width: 82px;
+    flex-shrink: 0;
+    background: #123e35;
+    color: #cadbd1;
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 17px;
+    padding: 25px 13px;
+}
+.relay-brand {
+    font-size: 45px;
+    font-weight: 800;
+    letter-spacing: -7px;
+    line-height: 1;
+    margin-bottom: 36px;
+    color: #fff;
+}
+.relay-brand span {
+    color: #e8c67c;
+    font-size: 35px;
+}
+.relay-rail > button,
+.relay-rail > a:not(.relay-brand) {
+    padding: 12px;
+    border-radius: 14px;
+    position: relative;
+}
+.relay-rail .active {
+    background: #356052;
+    color: white;
+}
+.relay-rail i {
+    position: absolute;
+    right: 9px;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    background: #e6bf6c;
+    border-radius: 50%;
+}
+.rail-spacer {
+    flex: 1;
+}
+.relay-sidebar {
+    width: 335px;
+    flex-shrink: 0;
+    background: #fff;
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+}
+.relay-sidebar header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 34px 25px 24px;
+}
+.relay small {
+    display: block;
+}
+.relay-sidebar header small,
+.relay-modal header small {
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    color: var(--muted);
+    font-weight: 700;
+}
+.relay-sidebar h1 {
+    font-size: 27px;
+    font-weight: 650;
+    letter-spacing: -1px;
+    margin-top: 8px;
+}
+.relay-sidebar h1 span {
+    font-size: 12px;
+    letter-spacing: 0;
+    background: #eaf0e9;
+    border-radius: 8px;
+    padding: 3px 7px;
+    margin-left: 5px;
+    vertical-align: middle;
+}
+.relay-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+.relay-icon:hover {
+    background: #eaf0e9;
+}
+.relay-icon svg {
+    width: 20px;
+    height: 20px;
+}
+.relay-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #f3f5f1;
+    border: 1px solid #e9ece6;
+    padding: 12px;
+    border-radius: 10px;
+    margin: 0 23px;
+    color: var(--muted);
+}
+.relay-search input {
+    width: 100%;
+    outline: none;
+    background: none;
+    font-size: 12px;
+}
+.relay-list-title {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    color: #819087;
+    padding: 29px 25px 14px;
+}
+.relay-conversations {
+    overflow-y: auto;
+    flex: 1;
+    padding: 0 12px;
+}
+.relay-conversation {
+    display: flex;
+    text-align: left;
+    gap: 12px;
+    width: 100%;
+    padding: 16px 12px;
+    border-radius: 12px;
+    margin-bottom: 3px;
+}
+.relay-conversation:hover {
+    background: #f5f7f3;
+}
+.relay-conversation.selected {
+    background: #e9f0e7;
+}
+.relay-conversation > div {
+    flex: 1;
+    min-width: 0;
+}
+.relay-conversation strong {
+    font-size: 13px;
+    font-weight: 650;
+}
+.relay-conversation p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #7e8981;
+    font-size: 11px;
+    margin-top: 5px;
+}
+.relay-conversation aside {
+    display: flex;
+    align-items: flex-end;
+    flex-direction: column;
+    gap: 8px;
+}
+.relay-conversation time {
+    font-size: 9px;
+    color: #8c978f;
+}
+.relay-conversation b {
+    background: #31624b;
+    color: white;
+    border-radius: 7px;
+    font-size: 9px;
+    padding: 1px 6px;
+}
+.relay-avatar {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    background: #e9ddc3;
+    color: #665a3f;
+    border-radius: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    font-size: 13px;
+    font-weight: 600;
+}
+.relay-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+}
+.relay-avatar i {
+    width: 9px;
+    height: 9px;
+    background: #b0b9ad;
+    border: 2px solid white;
+    border-radius: 50%;
+    position: absolute;
+    right: -1px;
+    bottom: 0;
+}
+.relay-avatar i.online {
+    background: #619866;
+}
+.relay-sidebar footer {
+    border-top: 1px solid var(--line);
+    padding: 22px;
+    display: flex;
+    gap: 10px;
+    color: #69816c;
+    font-size: 10px;
+}
+.relay-sidebar footer small {
+    color: #95a091;
+    font-size: 9px;
+    margin-top: 3px;
+}
+.relay-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+.relay-connection {
+    background: #f0f3ed;
+    padding: 8px 27px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #7d897c;
+    font-size: 10px;
+    min-height: 32px;
+}
+.relay-connection > span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #c3a769;
+}
+.relay-connection > span.connected {
+    background: #6c936c;
+}
+.relay-connection button {
+    margin-left: auto;
+    text-decoration: underline;
+}
+.relay-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: #fff0e9;
+    color: #9c3c2f;
+    font-size: 12px;
+}
+.relay-chat-header {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    background: white;
+    padding: 21px 30px;
+    border-bottom: 1px solid var(--line);
+}
+.relay-chat-header h2 {
+    font-size: 15px;
+    font-weight: 650;
+}
+.relay-chat-header p {
+    font-size: 10px;
+    color: #82917e;
+    margin-top: 3px;
+}
+.header-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+.relay-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 25px 5%;
+    scrollbar-width: thin;
+}
+.relay-date {
+    text-align: center;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    color: #a0aa9b;
+    margin: 4px 0 30px;
+}
+.relay-message {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 19px;
+}
+.relay-message.mine {
+    align-items: flex-end;
+}
+.relay-bubble {
+    background: white;
+    border: 1px solid #e8ebe3;
+    padding: 12px 16px;
+    border-radius: 15px 15px 15px 3px;
+    max-width: min(85%, 540px);
+    box-shadow: 0 2px 2px #233c2010;
+}
+.relay-bubble p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.65;
+}
+.mine .relay-bubble {
+    background: #dce9d9;
+    border-color: #d5e3d1;
+    border-radius: 15px 15px 3px 15px;
+}
+.relay-message > small {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 9px;
+    color: #96a08f;
+    margin-top: 6px;
+    padding: 0 2px;
+}
+.relay-message > small span {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.relay-message > small button {
+    color: #ac4637;
+    text-decoration: underline;
+}
+.relay-file {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 6px 0;
+    max-width: 340px;
+}
+.relay-file img,
+.relay-file video {
+    max-height: 240px;
+    border-radius: 9px;
+    max-width: 100%;
+    object-fit: contain;
+}
+.relay-file > button:has(img) {
+    width: 100%;
+}
+.relay-file strong {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.relay-file small {
+    font-size: 9px;
+    opacity: 0.65;
+    margin-top: 3px;
+}
+.relay-file > a {
+    margin-left: auto;
+}
+.relay-file audio {
+    max-width: 100%;
+}
+.relay-composer {
+    padding: 15px 30px 20px;
+}
+.relay-compose-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border: 1px solid #dfe5da;
+    padding: 10px 12px;
+    border-radius: 13px;
+    box-shadow: 0 3px 10px #3b4b2306;
+}
+.relay-compose-box textarea {
+    resize: none;
+    flex: 1;
+    min-width: 0;
+    outline: none;
+    font-size: 13px;
+    padding: 8px 0;
+    max-height: 120px;
+    background: transparent;
+}
+.relay-send {
+    background: #214e3d;
+    color: white;
+    padding: 12px;
+    border-radius: 10px;
+}
+.relay-composer > small {
+    display: flex;
+    justify-content: space-between;
+    color: #a1a998;
+    font-size: 9px;
+    margin: 10px 3px 0;
+}
+.relay-composer > small span {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.relay-selected-files {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.relay-selected-files span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #e7ecdf;
+    padding: 7px;
+    border-radius: 6px;
+    font-size: 10px;
+}
+.relay-upload {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 11px;
+    margin-bottom: 8px;
+}
+.relay-welcome {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 30px;
+    background: radial-gradient(ellipse at center, #ecf0e5 0%, #fbfaf7 68%);
+}
+.relay-welcome-icon {
+    color: #3b6448;
+    background: #e2e9d7;
+    border: 1px solid #d4dec8;
+    padding: 26px;
+    border-radius: 28px;
+    transform: rotate(-7deg);
+    box-shadow: 12px 13px 0 #f0eada;
+    margin-bottom: 45px;
+}
+.relay-welcome > small {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: #859077;
+    font-weight: 700;
+}
+.relay-welcome h2 {
+    font-family: Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -2px;
+    font-size: clamp(35px, 4.3vw, 62px);
+    line-height: 1.1;
+    margin: 20px 0;
+}
+.relay-welcome p {
+    color: #8a9380;
+    font-size: 12px;
+    line-height: 1.9;
+    margin-bottom: 25px;
+}
+.relay-primary,
+.relay-secondary,
+.relay-danger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 9px;
+    padding: 11px 17px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.relay-primary {
+    background: #224f3d;
+    color: white;
+}
+.relay-secondary {
+    border: 1px solid #dce3d5;
+    color: #65775d;
+    background: #f5f7f0;
+}
+.relay-danger {
+    background: #ad4c42;
+    color: white;
+}
+.relay-features {
+    display: flex;
+    gap: 26px;
+    margin-top: 65px;
+    color: #8b977f;
+    font-size: 10px;
+}
+.relay-features span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.relay-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    height: 100%;
+    gap: 14px;
+    color: #8c9b80;
+}
+.relay-empty h2 {
+    font-family: Georgia, serif;
+    font-size: 27px;
+    color: #536b4a;
+}
+.relay-empty p {
+    max-width: 300px;
+    line-height: 1.8;
+    font-size: 12px;
+}
+.relay-muted {
+    color: #83917c;
+    font-size: 12px;
+    line-height: 1.7;
+}
+.relay-overlay {
+    position: fixed;
+    inset: 0;
+    background: #0b281e80;
+    backdrop-filter: blur(5px);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.relay-modal {
+    background: var(--paper);
+    border: 1px solid #e4e7db;
+    border-radius: 20px;
+    box-shadow: 0 24px 100px #03271740;
+    padding: 27px;
+    width: 530px;
+    max-height: 90dvh;
+    overflow-y: auto;
+}
+.relay-modal.wide {
+    width: 980px;
+}
+.relay-modal > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 25px;
+}
+.relay-modal h2 {
+    font-size: 24px;
+    font-family: Georgia, serif;
+    letter-spacing: -0.5px;
+    margin-top: 7px;
+}
+.relay-modal .relay-search {
+    margin: 0 0 15px;
+}
+.relay-person {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 14px 0;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+}
+.relay-person div {
+    flex: 1;
+}
+.relay-person small,
+.relay-notice small {
+    color: #89967e;
+    font-size: 10px;
+    margin-top: 5px;
+}
+.relay-form {
+    display: flex;
+    flex-direction: column;
+    gap: 19px;
+}
+.relay-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.relay-form input,
+.relay-form select {
+    width: 100%;
+    padding: 11px;
+    background: white;
+    border: 1px solid #dce2d4;
+    border-radius: 8px;
+    font-weight: 400;
+    color: #36503c;
+}
+.relay-form input[type='file'] {
+    font-size: 11px;
+}
+.relay-notification-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+.relay-notification-settings label {
+    font-size: 11px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.relay-notification-settings small {
+    font-size: 10px;
+    color: #8c977f;
+}
+.relay-notice {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    border-bottom: 1px solid var(--line);
+    padding: 15px 10px;
+    width: 100%;
+    text-align: left;
+}
+.relay-notice div {
+    flex: 1;
+}
+.relay-notice strong {
+    text-transform: capitalize;
+    font-size: 12px;
+}
+.relay-notice.unread {
+    background: #eaf0e0;
+}
+.relay-notice i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #376343;
+}
+.relay-viewer {
+    max-width: 100%;
+    max-height: 95dvh;
+    background: white;
+    padding: 15px;
+    border-radius: 14px;
+}
+.relay-viewer header {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+}
+.relay-viewer img,
+.relay-viewer video {
+    max-height: 80dvh;
+    max-width: 90vw;
+}
+.relay-viewer header a {
+    font-size: 12px;
+    text-decoration: underline;
+}
+.relay-call {
+    width: 700px;
+    border-radius: 25px;
+    padding: 35px;
+    background: #153d32;
+    color: #edf0df;
+    text-align: center;
+}
+.relay-call > small {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: #b7c99b;
+}
+.relay-call h2 {
+    font-size: 30px;
+    font-family: Georgia, serif;
+    margin: 12px;
+}
+.relay-call > p {
+    font-size: 12px;
+    color: #b7c99b;
+    text-transform: capitalize;
+}
+.relay-call-video {
+    position: relative;
+    min-height: 270px;
+    margin: 25px 0;
+    background: #0e2c25;
+    border-radius: 15px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.relay-call-video > video {
+    width: 100%;
+    max-height: 50vh;
+}
+.relay-call-video.voice-only > video {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+.relay-local {
+    position: absolute;
+    width: 25%;
+    bottom: 15px;
+    right: 15px;
+    border-radius: 9px;
+    overflow: hidden;
+}
+.relay-call-controls {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    margin-top: 24px;
+}
+.call-overlay {
+    z-index: 70;
+}
+.relay-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+}
+.relay-metrics > div {
+    background: #eaf0e1;
+    border: 1px solid #dde6d4;
+    border-radius: 10px;
+    padding: 15px;
+}
+.relay-metrics small {
+    text-transform: capitalize;
+    font-size: 10px;
+    color: #7b8a6e;
+}
+.relay-metrics strong {
+    display: block;
+    font-size: 25px;
+    margin-top: 8px;
+}
+.relay-admin-toolbar {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    margin: 23px 0;
+}
+.relay-admin-toolbar .relay-search {
+    flex: 1;
+    margin: 0;
+}
+.relay-table-scroll {
+    overflow-x: auto;
+}
+.relay-admin table {
+    width: 100%;
+    text-align: left;
+    font-size: 12px;
+    border-collapse: collapse;
+}
+.relay-admin th {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #839174;
+    padding: 14px 8px;
+    border-bottom: 1px solid var(--line);
+}
+.relay-admin td {
+    padding: 16px 8px;
+    border-bottom: 1px solid var(--line);
+}
+.relay-admin td small {
+    color: #94a086;
+    font-size: 10px;
+    margin-top: 4px;
+}
+.relay-admin td button {
+    color: #42613a;
+    font-size: 10px;
+    text-decoration: underline;
+    margin: 3px 8px 3px 0;
+}
+.relay-pagination {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #6d815e;
+    padding: 20px 0;
+}
+.relay-editor {
+    border: 1px solid var(--line);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+.relay-success {
+    color: #42683e;
+    background: #e4f0dc;
+    padding: 12px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+}
+.mobile-back {
+    display: none;
+}
+@media (max-width: 1000px) {
+    .relay-sidebar {
+        width: 285px;
+    }
+    .relay-rail {
+        width: 65px;
+        padding: 25px 8px;
+    }
+    .relay-chat-header {
+        padding: 18px;
+    }
+    .relay-metrics {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+@media (max-width: 700px) {
+    .relay-rail {
+        width: 58px;
+        gap: 14px;
+        padding: 20px 7px;
+    }
+    .relay-rail svg {
+        width: 19px;
+        height: 19px;
+    }
+    .relay-rail > button {
+        padding: 10px;
+    }
+    .relay-rail > .relay-avatar {
+        width: 33px;
+        height: 33px;
+    }
+    .relay-sidebar {
+        width: calc(100% - 58px);
+    }
+    .relay .mobile-hide {
+        display: none;
+    }
+    .mobile-back {
+        display: inline-flex;
+    }
+    .relay-chat-header {
+        gap: 9px;
+        padding: 14px 10px;
+    }
+    .relay-chat-header .relay-avatar {
+        width: 33px;
+        height: 33px;
+        border-radius: 11px;
+    }
+    .relay-chat-header h2 {
+        font-size: 13px;
+    }
+    .relay-chat-header p {
+        max-width: 120px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .header-actions {
+        gap: 0;
+    }
+    .relay-connection {
+        padding: 8px;
+        font-size: 8px;
+    }
+    .relay-composer {
+        padding: 10px;
+    }
+    .relay-compose-box {
+        gap: 5px;
+        padding: 7px;
+    }
+    .relay-composer > small span {
+        display: none;
+    }
+    .relay-history {
+        padding: 20px 12px;
+    }
+    .relay-overlay {
+        padding: 10px;
+    }
+    .relay-modal {
+        padding: 20px;
+    }
+    .relay-modal h2 {
+        font-size: 21px;
+    }
+    .relay-call {
+        padding: 25px 15px;
+    }
+    .relay-file audio {
+        width: 210px;
+    }
+    .relay-metrics {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .relay-bubble {
+        max-width: 95%;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .relay * {
+        scroll-behavior: auto !important;
+        animation: none !important;
+    }
+}
+
+.relay-error {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 100;
+    max-width: min(550px, 90vw);
+    border: 1px solid #e3bcac;
+    border-radius: 10px;
+    box-shadow: 0 6px 30px #50302020;
+    gap: 20px;
+}
+
+.relay-camera-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 90px;
+    aspect-ratio: 4/3;
+    padding: 10px;
+    background: #102d25;
+    color: #bdcbb3;
+    font-size: 10px;
+    line-height: 1.4;
+}
+
+.relay-call-controls .relay-hangup {
+    min-width: 132px;
+    border-radius: 999px;
+    padding: 14px 22px;
+    gap: 10px;
+    background: #c14f47;
+    box-shadow: 0 4px 16px #0002;
+}
+.relay-call-controls .relay-hangup:hover:not(:disabled) {
+    background: #a9423c;
+}
+.relay-call-controls .relay-hangup svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+.relay-call-finished {
+    width: 100%;
+}
+.relay-call-finished > p {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1.7;
+    margin-bottom: 16px;
+}
