@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import {
     api,
+    ApiError,
     upload,
     csrfHeaders,
     type Person,
@@ -49,7 +50,12 @@ import * as noticesRoute from '@/routes/api/notifications';
 import * as callsRoute from '@/routes/api/calls';
 import * as broadcastRoute from '@/routes/api/broadcast';
 import * as profileRoute from '@/routes/api/profile';
-import { logout } from '@/routes';
+import { logout, login } from '@/routes';
+import {
+    createRealtimeRecovery,
+    realtimeConnectionIssue,
+    type RealtimeRecovery,
+} from '@/lib/realtime-recovery';
 import AdminPanel from '@/components/chat/admin-panel';
 import '../../css/messenger.css';
 type Envelope<T> = { data: T };
@@ -172,6 +178,8 @@ export default function Messenger() {
         [files, setFiles] = useState<File[]>([]),
         [progress, setProgress] = useState<number | null>(null),
         [error, setError] = useState(''),
+        [liveError, setLiveError] = useState(''),
+        [sessionExpired, setSessionExpired] = useState(false),
         [loading, setLoading] = useState(false),
         [panel, setPanel] = useState<
             'new' | 'notifications' | 'profile' | 'admin' | null
@@ -196,6 +204,10 @@ export default function Messenger() {
     const selectedRef = useRef<Conversation | null>(null),
         uploadAbort = useRef<AbortController | null>(null),
         echoRef = useRef<Echo<'pusher'> | null>(null),
+        pusherRef = useRef<Pusher | null>(null),
+        recoveryRef = useRef<RealtimeRecovery | null>(null),
+        refreshInFlight = useRef<Promise<void> | null>(null),
+        authExpired = useRef(false),
         handlers = useRef({
             message: (_m: Message) => {},
             refresh: () => {},
@@ -218,7 +230,31 @@ export default function Messenger() {
             ...messages.filter((m) => !m.pending && !m.failed).map((m) => m.id),
         );
     }, [messages]);
+    function expireSession() {
+        authExpired.current = true;
+        setSessionExpired(true);
+        setConnection('Session expired');
+        setLiveError(
+            'Your session expired or this account is no longer active. Sign in again to continue.',
+        );
+        pusherRef.current?.disconnect();
+        call.dismiss();
+    }
+    function recoverLive() {
+        if (
+            !navigator.onLine ||
+            document.visibilityState !== 'visible' ||
+            authExpired.current
+        )
+            return;
+        if (recoveryRef.current) void recoveryRef.current.resume();
+        else handlers.current.refresh();
+    }
     function fail(e: unknown) {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 419)) {
+            expireSession();
+            return;
+        }
         setError((e as Error).message);
     }
     async function refreshConversations() {
@@ -325,7 +361,12 @@ export default function Messenger() {
     }
     handlers.current = {
         refresh: () => {
-            void reconcile().catch(fail);
+            if (authExpired.current || refreshInFlight.current) return;
+            refreshInFlight.current = reconcile()
+                .catch(fail)
+                .finally(() => {
+                    refreshInFlight.current = null;
+                });
         },
         message: (m) => {
             if (m.conversation_id !== selectedRef.current?.id) return;
@@ -405,16 +446,70 @@ export default function Messenger() {
         pusher.signin();
         const echo = new Echo({ broadcaster: 'pusher', client: pusher });
         echoRef.current = echo;
-        pusher.connection.bind('state_change', (state: { current: string }) => {
-            setConnection(state.current);
-            if (state.current === 'connected') handlers.current.refresh();
+        pusherRef.current = pusher;
+        const recovery = createRealtimeRecovery({
+            client: pusher,
+            getSession: async () => {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 10000);
+                try {
+                    return (
+                        await api<Envelope<Person>>(
+                            me(),
+                            undefined,
+                            controller.signal,
+                        )
+                    ).data;
+                } finally {
+                    clearTimeout(timeout);
+                }
+            },
+            onSession: (session) => {
+                setSelf(session);
+                if (
+                    pusher.connection.state === 'connected' &&
+                    pusher.allChannels().every((channel) => channel.subscribed)
+                ) {
+                    setLiveError((previous) =>
+                        previous.includes('subscription failed') ||
+                        previous.startsWith('Your session')
+                            ? previous
+                            : '',
+                    );
+                }
+            },
+            onExpired: expireSession,
+            onReconnect: () => {
+                setConnection('Reconnecting');
+                setLiveError('Reconnecting to live updates…');
+            },
+            onIssue: setLiveError,
+            onRefresh: () => handlers.current.refresh(),
         });
-        pusher.connection.bind('error', () =>
-            setError(
-                'Live connection failed. Check your connection and Pusher configuration.',
-            ),
-        );
+        recoveryRef.current = recovery;
+        pusher.connection.bind('state_change', (state: { current: string }) => {
+            if (authExpired.current) return;
+            setConnection(state.current);
+            if (state.current === 'connected') {
+                setLiveError((previous) =>
+                    previous.includes('subscription failed') ||
+                    previous.startsWith('Your session')
+                        ? previous
+                        : '',
+                );
+                handlers.current.refresh();
+            }
+        });
+        pusher.connection.bind('error', (event: unknown) => {
+            if (!authExpired.current)
+                setLiveError(realtimeConnectionIssue(event));
+        });
         echo.private(`v1.users.${self.id}`)
+            .subscribed(() =>
+                setLiveError((previous) =>
+                    previous.startsWith('Private user channel') ? '' : previous,
+                ),
+            )
             .listen('.v1.conversation.updated', () =>
                 handlers.current.refresh(),
             )
@@ -428,13 +523,18 @@ export default function Messenger() {
                 handlers.current.signal(event.data),
             )
             .error((error: unknown) =>
-                setError(subscriptionFailure(error, 'Private user channel')),
+                setLiveError(
+                    subscriptionFailure(error, 'Private user channel'),
+                ),
             );
         echo.join('v1.presence')
             .here(() => {})
             .joining(() => handlers.current.refresh())
             .leaving(() => handlers.current.refresh());
         return () => {
+            recovery.dispose();
+            recoveryRef.current = null;
+            pusherRef.current = null;
             echo.disconnect();
             echoRef.current = null;
         };
@@ -443,6 +543,13 @@ export default function Messenger() {
         if (!selected || !echoRef.current) return;
         const echo = echoRef.current;
         echo.private(`v1.conversations.${selected.id}`)
+            .subscribed(() =>
+                setLiveError((previous) =>
+                    previous.startsWith('Conversation subscription')
+                        ? ''
+                        : previous,
+                ),
+            )
             .listen('.v1.message.created', (e: Envelope<Message>) =>
                 handlers.current.message(e.data),
             )
@@ -454,10 +561,10 @@ export default function Messenger() {
                 }
             })
             .error((error: unknown) =>
-                setError(subscriptionFailure(error, 'Conversation')),
+                setLiveError(subscriptionFailure(error, 'Conversation')),
             );
         return () => echo.leave(`v1.conversations.${selected.id}`);
-    }, [selected?.id, connection === 'connected']);
+    }, [selected?.id]);
     useEffect(() => {
         const timer = setTimeout(() => {
             void refreshConversations().catch(fail);
@@ -491,22 +598,25 @@ export default function Messenger() {
     useEffect(() => {
         const onOnline = () => {
                 setOnline(true);
-                handlers.current.refresh();
+                recoverLive();
             },
             onOffline = () => setOnline(false),
             onVisible = () => {
-                if (document.visibilityState === 'visible')
-                    handlers.current.refresh();
+                if (document.visibilityState === 'visible') recoverLive();
             };
+        window.addEventListener('focus', recoverLive);
+        window.addEventListener('pageshow', recoverLive);
         window.addEventListener('online', onOnline);
         window.addEventListener('offline', onOffline);
         document.addEventListener('visibilitychange', onVisible);
         const timer = window.setInterval(() => {
             if (document.visibilityState === 'visible' && navigator.onLine)
-                handlers.current.refresh();
+                recoverLive();
         }, 30000);
         return () => {
             clearInterval(timer);
+            window.removeEventListener('focus', recoverLive);
+            window.removeEventListener('pageshow', recoverLive);
             window.removeEventListener('online', onOnline);
             window.removeEventListener('offline', onOffline);
             document.removeEventListener('visibilitychange', onVisible);
@@ -845,17 +955,31 @@ export default function Messenger() {
                                     : ''
                             }
                         />
-                        {!online
-                            ? 'Offline · retry messages when you reconnect'
-                            : connection === 'connected'
-                              ? 'Live connection secure'
-                              : connection === 'Live service not configured'
-                                ? 'Live service not configured · API sync every 30 seconds'
-                                : `${connection} · API sync available`}
-                        <button onClick={() => void reconcile().catch(fail)}>
-                            Refresh
-                        </button>
+                        {sessionExpired
+                            ? 'Session expired · sign in to reconnect'
+                            : !online
+                              ? 'Offline · retry messages when you reconnect'
+                              : connection === 'connected'
+                                ? 'Live connection secure'
+                                : connection === 'Live service not configured'
+                                  ? 'Live service not configured · API sync every 30 seconds'
+                                  : `${connection} · API sync available`}
+                        {sessionExpired ? (
+                            <Link href={login()}>Sign in</Link>
+                        ) : (
+                            <button onClick={recoverLive}>Refresh</button>
+                        )}
                     </div>
+                    {liveError && (
+                        <div className="relay-live-notice" role="status">
+                            {liveError}
+                            {!sessionExpired && (
+                                <button onClick={recoverLive}>
+                                    Retry connection
+                                </button>
+                            )}
+                        </div>
+                    )}
                     {error && (
                         <div role="alert" className="relay-error">
                             {error}

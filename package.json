@@ -9,6 +9,7 @@
         "check": "vp check",
         "check:fix": "vp check --fix",
         "types:check": "tsc --noEmit",
+        "test:realtime-recovery": "node --experimental-strip-types --test scripts/realtime-recovery.test.mjs",
         "test:call-media": "node --experimental-strip-types --test scripts/call-media.test.mjs"
     },
     "dependencies": {

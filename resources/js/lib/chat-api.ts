@@ -1,3 +1,12 @@
+export class ApiError extends Error {
+    constructor(
+        public readonly status: number,
+        message: string,
+    ) {
+        super(message);
+        this.name = 'ApiError';
+    }
+}
 export type Endpoint = { url: string; method: string };
 export function csrfHeaders(): Record<string, string> {
     const token = document.cookie
@@ -37,7 +46,8 @@ export async function api<T>(
         const data = await response
             .json()
             .catch(() => ({ message: response.statusText }));
-        throw new Error(
+        throw new ApiError(
+            response.status,
             response.status === 401 || response.status === 419
                 ? 'Your session expired. Reload and sign in again.'
                 : Object.values(data.errors ?? {})

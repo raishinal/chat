@@ -1027,3 +1027,19 @@
     line-height: 1.7;
     margin-bottom: 16px;
 }
+
+.relay-live-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 24px;
+    background: #f7f1df;
+    color: #79683a;
+    font-size: 11px;
+    line-height: 1.6;
+}
+.relay-live-notice button {
+    flex-shrink: 0;
+    text-decoration: underline;
+}
