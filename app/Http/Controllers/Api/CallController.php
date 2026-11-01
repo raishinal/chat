@@ -116,6 +116,10 @@ class CallController extends Controller
         $this->participant($r, $call);
         Gate::authorize('send', $call->conversation);
         $v = $r->validated();
+        if ($v['type'] === 'ice' && $v['payload']['candidate'] === null) {
+            // Laravel converts empty strings to null; preserve the WebRTC wire format.
+            $v['payload']['candidate'] = '';
+        }
         abort_unless(in_array($call->status, ['accepted', 'connected']) && $call->expires_at->isFuture(), 409, 'Call cannot accept signaling.');
         abort_if(($v['type'] === 'offer' && $r->user()->id !== $call->caller_id) || ($v['type'] === 'answer' && $r->user()->id !== $call->callee_id), 403);
         // Chunks avoid Pusher's 10KB event limit for larger SDP descriptions.

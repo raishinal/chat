@@ -24,6 +24,12 @@ class ChatEvent implements ShouldBroadcast, ShouldDispatchAfterCommit
         return $this->name;
     }
 
+    public function shouldBroadcastNow(): bool
+    {
+        // Answering a call must not wait for the database queue's polling cycle.
+        return $this->name === 'v1.call.updated';
+    }
+
     /** @return array<string, mixed> */
     public function broadcastWith(): array
     {
