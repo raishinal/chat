@@ -264,12 +264,12 @@ test('signaling preserves SDP line endings through every broadcast chunk', funct
     expect($received)->toBe($payload);
 })->with(['offer', 'answer']);
 
-test('ICE signaling forwards candidates and end-of-candidates markers', function (string $candidate) {
+test('ICE signaling forwards a relay candidate', function () {
     [$a, $b, $conversation] = pair();
     $call = Call::create(['conversation_id' => $conversation->id, 'caller_id' => $a->id, 'callee_id' => $b->id, 'kind' => 'audio', 'status' => 'accepted', 'expires_at' => now()->addMinute()]);
     config(['broadcasting.default' => 'pusher']);
     Event::fake([SignalEvent::class]);
-    $payload = ['candidate' => $candidate, 'sdpMid' => '0', 'sdpMLineIndex' => 0];
+    $payload = ['candidate' => 'candidate:1 1 udp 1677734911 192.0.2.1 3478 typ relay raddr 0.0.0.0 rport 0', 'sdpMid' => '0', 'sdpMLineIndex' => 0];
 
     $this->actingAs($a)->postJson('/api/v1/calls/'.$call->id.'/signal', ['type' => 'ice', 'payload' => $payload])->assertNoContent();
 
@@ -279,10 +279,27 @@ test('ICE signaling forwards candidates and end-of-candidates markers', function
         return $data['type'] === 'ice'
             && json_decode(base64_decode($data['chunk'], true), true, flags: JSON_THROW_ON_ERROR) === $payload;
     });
-})->with([
-    'relay candidate' => ['candidate:1 1 udp 1677734911 192.0.2.1 3478 typ relay raddr 0.0.0.0 rport 0'],
-    'end of candidates' => [''],
-]);
+});
+
+test('ICE completion arriving before a relay candidate does not close remote gathering', function () {
+    [$a, $b, $conversation] = pair();
+    $call = Call::create(['conversation_id' => $conversation->id, 'caller_id' => $a->id, 'callee_id' => $b->id, 'kind' => 'audio', 'status' => 'accepted', 'expires_at' => now()->addMinute()]);
+    config(['broadcasting.default' => 'pusher']);
+    Event::fake([SignalEvent::class]);
+
+    $this->actingAs($a)->postJson('/api/v1/calls/'.$call->id.'/signal', ['type' => 'ice', 'payload' => ['candidate' => '', 'sdpMid' => '0', 'sdpMLineIndex' => 0]])->assertNoContent();
+    Event::assertNotDispatched(SignalEvent::class);
+
+    $payload = ['candidate' => 'candidate:1 1 udp 1677734911 192.0.2.1 3478 typ relay raddr 0.0.0.0 rport 0', 'sdpMid' => '0', 'sdpMLineIndex' => 0];
+    $this->postJson('/api/v1/calls/'.$call->id.'/signal', ['type' => 'ice', 'payload' => $payload])->assertNoContent();
+
+    Event::assertDispatched(SignalEvent::class, function (SignalEvent $event) use ($payload) {
+        $data = $event->broadcastWith()['data'];
+
+        return json_decode(base64_decode($data['chunk'], true), true, flags: JSON_THROW_ON_ERROR) === $payload;
+    });
+    expect($call->fresh()->status)->toBe('accepted');
+});
 
 test('ICE signaling rejects a missing or malformed candidate with 422', function (array $payload) {
     [$a, $b, $conversation] = pair();

@@ -116,12 +116,13 @@ class CallController extends Controller
         $this->participant($r, $call);
         Gate::authorize('send', $call->conversation);
         $v = $r->validated();
-        if ($v['type'] === 'ice' && $v['payload']['candidate'] === null) {
-            // Laravel converts empty strings to null; preserve the WebRTC wire format.
-            $v['payload']['candidate'] = '';
-        }
         abort_unless(in_array($call->status, ['accepted', 'connected']) && $call->expires_at->isFuture(), 409, 'Call cannot accept signaling.');
         abort_if(($v['type'] === 'offer' && $r->user()->id !== $call->caller_id) || ($v['type'] === 'answer' && $r->user()->id !== $call->callee_id), 403);
+        if ($v['type'] === 'ice' && in_array($v['payload']['candidate'], [null, ''], true)) {
+            // ICE requests can arrive out of order. A completion marker must not
+            // close the remote candidate list before real candidates arrive.
+            return response()->noContent();
+        }
         // Chunks avoid Pusher's 10KB event limit for larger SDP descriptions.
         $payload = json_encode($v['payload'], JSON_THROW_ON_ERROR);
         $chunks = str_split(base64_encode($payload), 6000);

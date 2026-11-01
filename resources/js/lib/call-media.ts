@@ -68,6 +68,7 @@ export function releaseCallMedia(
     if (peer) {
         peer.ontrack = null;
         peer.onicecandidate = null;
+        peer.onicecandidateerror = null;
         peer.onconnectionstatechange = null;
         peer.oniceconnectionstatechange = null;
     }
@@ -94,4 +95,43 @@ export function callSeconds(
     return from !== null && Number.isFinite(from) && Number.isFinite(to)
         ? Math.max(0, Math.floor((to - from) / 1000))
         : 0;
+}
+
+type AudioStat = {
+    type: string;
+    kind?: string;
+    mediaType?: string;
+    audioLevel?: number;
+    totalAudioEnergy?: number;
+    bytesSent?: number;
+    bytesReceived?: number;
+    packetsSent?: number;
+    packetsReceived?: number;
+    packetsLost?: number;
+    roundTripTime?: number;
+};
+
+/** Audio counters only: never expose device names, addresses, SDP or credentials. */
+export function summarizeCallAudio(stats: Iterable<AudioStat>) {
+    return [...stats]
+        .filter((entry) => (entry.kind ?? entry.mediaType) === 'audio')
+        .filter((entry) =>
+            [
+                'media-source',
+                'outbound-rtp',
+                'inbound-rtp',
+                'remote-inbound-rtp',
+            ].includes(entry.type),
+        )
+        .map((entry) => ({
+            type: entry.type,
+            audioLevel: entry.audioLevel,
+            totalAudioEnergy: entry.totalAudioEnergy,
+            bytesSent: entry.bytesSent,
+            bytesReceived: entry.bytesReceived,
+            packetsSent: entry.packetsSent,
+            packetsReceived: entry.packetsReceived,
+            packetsLost: entry.packetsLost,
+            roundTripTime: entry.roundTripTime,
+        }));
 }

@@ -53,7 +53,7 @@ TTL is seconds, defaults to one hour, and is bounded by this application's polic
 
 ## React website
 
-`resources/js/hooks/use-chat-call.ts` fetches via the generated Wayfinder `ice()` route with same-origin cookie authentication. Outgoing calls fetch before creating/ringing the server call; incoming acceptance fetches before acquiring media/creating the peer and accepting the call. Failure stops setup and displays the existing recoverable error. Pusher still handles offers, answers, candidates and call transitions.
+`resources/js/hooks/use-chat-call.ts` fetches via the generated Wayfinder `ice()` route with same-origin cookie authentication. Outgoing calls fetch before creating/ringing the server call. Incoming calls prefetch while ringing and reuse the request on acceptance for the same call for up to 10 seconds; older or failed requests are refreshed. Microphone/camera access still waits for acceptance and successful credential loading. Call teardown clears the prefetched credentials. Failure stops setup and displays the existing recoverable error. Pusher still handles offers, answers, candidates and call transitions.
 
 ## React Native starter
 

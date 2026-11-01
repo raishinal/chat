@@ -6,8 +6,11 @@ import {
     acquireCallMedia,
     releaseCallMedia,
     addRemoteTrack,
+    summarizeCallAudio,
 } from '@/lib/call-media';
 import { createCallRingback } from '@/lib/call-ringback';
+import { confirmCallEnd } from '@/lib/call-ending';
+import { createCallConnectivityLoader } from '@/lib/call-connectivity';
 export type Signal = {
     call_id: number;
     type: 'offer' | 'answer' | 'ice';
@@ -50,9 +53,16 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         locallyEnded = useRef(new Set<number>()),
         dismissed = useRef(new Set<number>()),
         endingRequests = useRef(new Set<number>()),
+        confirmedEnds = useRef(new Set<number>()),
         pendingEnd = useRef<{ id: number; action: string } | null>(null),
         closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const connectivityLoader = useRef(
+        createCallConnectivityLoader((signal) =>
+            api<{ ice_servers: RTCIceServer[] }>(ice(), undefined, signal),
+        ),
+    );
     function cleanup() {
+        connectivityLoader.current.clear();
         ringtone.current?.stop();
         ringback.current?.stop();
         generation.current++;
@@ -116,25 +126,39 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             }
             // Capture stops immediately, before waiting for the network.
             cleanup();
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 10000);
             try {
-                const result = await api<{ data: Call }>(
-                    update(id),
-                    { action },
-                    controller.signal,
+                await confirmCallEnd(
+                    async (signal) => {
+                        const result = await api<{ data: Call }>(
+                            update(id),
+                            { action },
+                            signal,
+                        );
+                        receive(result.data);
+                    },
+                    () => confirmedEnds.current.has(id),
                 );
-                receive(result.data);
-                pendingEnd.current = null;
-                closeSoon(id);
-            } catch {
+                if (pendingEnd.current?.id === id) pendingEnd.current = null;
+                if (current.current?.id === id) closeSoon(id);
+            } catch (error) {
+                if (confirmedEnds.current.has(id) || current.current?.id !== id)
+                    return;
+                console.warn('Relay hang-up request failed', {
+                    callId: id,
+                    status:
+                        typeof error === 'object' &&
+                        error !== null &&
+                        'status' in error
+                            ? error.status
+                            : null,
+                    errorName: error instanceof Error ? error.name : 'Unknown',
+                });
                 setEndError(
                     'Your microphone and camera are off. Could not confirm hang-up with the server. Retry to notify the other person.',
                 );
             } finally {
-                clearTimeout(timeout);
                 endingRequests.current.delete(id);
-                setEnding(false);
+                if (current.current?.id === id) setEnding(false);
             }
             return;
         }
@@ -163,9 +187,15 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         current.current = next;
         setCall(next);
         if (next.ended_at) {
+            confirmedEnds.current.add(next.id);
+            if (pendingEnd.current?.id === next.id) {
+                pendingEnd.current = null;
+                setEndError('');
+                setEnding(false);
+            }
             locallyEnded.current.add(next.id);
             cleanup();
-            if (!endingRequests.current.has(next.id)) closeSoon(next.id);
+            closeSoon(next.id);
         }
     }
     async function prepare(
@@ -182,8 +212,7 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                 );
             // Fetch fresh short-lived connectivity credentials before accessing media.
             const config =
-                connectivity ??
-                (await api<{ ice_servers: RTCIceServer[] }>(ice()));
+                connectivity ?? (await connectivityLoader.current.load(c.id));
             if (gen !== generation.current) throw new Error('Call ended.');
             mediaAbort.current = new AbortController();
             const media = await acquireCallMedia(
@@ -225,6 +254,54 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                         if (!locallyEnded.current.has(c.id)) onError(e.message);
                     });
             };
+            // Report connectivity failures without logging SDP, addresses or credentials.
+            const iceErrors: number[] = [];
+            peer.onicecandidateerror = (event) => {
+                if (gen !== generation.current) return;
+                if (!iceErrors.includes(event.errorCode))
+                    iceErrors.push(event.errorCode);
+            };
+            let failureReported = false;
+            const reportConnectionFailure = async () => {
+                const localTypes = new Set<string>();
+                const remoteTypes = new Set<string>();
+                const pairStates = new Set<string>();
+                try {
+                    const stats = await peer.getStats();
+                    stats.forEach((entry) => {
+                        if (entry.type === 'local-candidate')
+                            localTypes.add(entry.candidateType);
+                        if (entry.type === 'remote-candidate')
+                            remoteTypes.add(entry.candidateType);
+                        if (entry.type === 'candidate-pair')
+                            pairStates.add(entry.state);
+                    });
+                } catch {
+                    // State information is still useful if statistics are unavailable.
+                }
+                if (
+                    gen !== generation.current ||
+                    locallyEnded.current.has(c.id)
+                )
+                    return;
+                console.error('Relay call connectivity diagnostic', {
+                    callId: c.id,
+                    connectionState: peer.connectionState,
+                    iceConnectionState: peer.iceConnectionState,
+                    iceGatheringState: peer.iceGatheringState,
+                    signalingState: peer.signalingState,
+                    localDescriptionType: peer.localDescription?.type ?? null,
+                    remoteDescriptionType: peer.remoteDescription?.type ?? null,
+                    localCandidateTypes: [...localTypes],
+                    remoteCandidateTypes: [...remoteTypes],
+                    candidatePairStates: [...pairStates],
+                    iceErrorCodes: iceErrors,
+                });
+                onError(
+                    'Call audio could not connect. Check both networks and the Cloudflare TURN configuration, then redial.',
+                );
+                void action('failed', c.id).catch((e) => onError(e.message));
+            };
             const connectionChanged = () => {
                 if (
                     gen !== generation.current ||
@@ -247,15 +324,12 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                     }
                 }
                 if (
-                    peer.connectionState === 'failed' ||
-                    peer.iceConnectionState === 'failed'
+                    !failureReported &&
+                    (peer.connectionState === 'failed' ||
+                        peer.iceConnectionState === 'failed')
                 ) {
-                    onError(
-                        'Call audio could not connect. Check both networks and the Cloudflare TURN configuration, then redial.',
-                    );
-                    void action('failed', c.id).catch((e) =>
-                        onError(e.message),
-                    );
+                    failureReported = true;
+                    void reportConnectionFailure();
                 }
                 if (peer.connectionState === 'disconnected')
                     onError(
@@ -297,6 +371,18 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             else cleanup();
         }
     }
+    useEffect(() => {
+        if (
+            call?.status === 'ringing' &&
+            call.callee_id === me &&
+            !call.ended_at
+        ) {
+            // Start only the network request while ringing, never microphone capture.
+            void connectivityLoader.current.load(call.id).catch(() => {
+                // A failed prefetch is retried and reported if the user accepts.
+            });
+        }
+    }, [call?.id, call?.status, call?.ended_at, me]);
     async function accept() {
         ringtone.current?.stop();
         const incoming = current.current;
@@ -460,10 +546,41 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         }, 20000);
         return () => clearInterval(timer);
     }, [call?.id, call?.ended_at, connectedAt]);
+    useEffect(() => {
+        if (!connectedAt || !call || call.ended_at) return;
+        const peer = pc.current;
+        const gen = generation.current;
+        if (!peer) return;
+        let samples = 0;
+        const timer = window.setInterval(() => {
+            if (++samples >= 3) window.clearInterval(timer);
+            void peer
+                .getStats()
+                .then((stats) => {
+                    if (gen !== generation.current) return;
+                    console.info('Relay call audio diagnostic', {
+                        callId: call.id,
+                        microphone: stream.current
+                            ?.getAudioTracks()
+                            .map((track) => ({
+                                enabled: track.enabled,
+                                muted: track.muted,
+                                readyState: track.readyState,
+                            })),
+                        audio: summarizeCallAudio(stats.values()),
+                    });
+                })
+                .catch(() => {
+                    // Closing a peer during the sample must not create a call error.
+                });
+        }, 5000);
+        return () => window.clearInterval(timer);
+    }, [connectedAt, call?.id, call?.ended_at]);
     useEffect(
         () => () => {
             generation.current++;
             mediaAbort.current?.abort();
+            connectivityLoader.current.clear();
             ringback.current?.dispose();
             ringtone.current?.dispose();
             if (closeTimer.current) clearTimeout(closeTimer.current);

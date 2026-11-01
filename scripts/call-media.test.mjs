@@ -5,6 +5,7 @@ import {
     releaseCallMedia,
     addRemoteTrack,
     callSeconds,
+    summarizeCallAudio,
 } from '../resources/js/lib/call-media.ts';
 function track(kind) {
     return {
@@ -15,6 +16,23 @@ function track(kind) {
         },
     };
 }
+
+await test('audio diagnostics distinguish capture and each media direction without exposing network data', () => {
+    const summary = summarizeCallAudio([
+        { type: 'media-source', kind: 'audio', audioLevel: 0.4, totalAudioEnergy: 1.2, deviceId: 'private-device' },
+        { type: 'outbound-rtp', kind: 'audio', bytesSent: 4000, packetsSent: 40, transportId: 'private-transport' },
+        { type: 'inbound-rtp', mediaType: 'audio', bytesReceived: 0, packetsReceived: 0 },
+        { type: 'local-candidate', kind: 'audio', address: '192.0.2.1', usernameFragment: 'private-fragment' },
+        { type: 'outbound-rtp', kind: 'video', bytesSent: 9000 },
+    ]);
+    assert.equal(summary.length, 3);
+    assert.equal(summary[0].totalAudioEnergy, 1.2);
+    assert.equal(summary[1].bytesSent, 4000);
+    assert.equal(summary[2].bytesReceived, 0);
+    const encoded = JSON.stringify(summary);
+    assert.equal(encoded.includes('private-'), false);
+    assert.equal(encoded.includes('192.0.2.1'), false);
+});
 function stream(...tracks) {
     return {
         getTracks: () => tracks,
