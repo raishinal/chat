@@ -145,6 +145,28 @@ test('uploads accept unknown types and multiple files but enforce membership and
     $this->actingAs($a)->postJson('/api/v1/conversations/'.$c->id.'/messages', ['client_id' => (string) Str::uuid(), 'attachment_ids' => array_column($response->json('data'), 'id')])->assertCreated()->assertJsonCount(2, 'data.attachments');
     $this->actingAs($outsider)->getJson('/api/v1/attachments/'.$id)->assertForbidden();
 });
+test('uploads accept a file at the default one GiB limit', function () {
+    Storage::fake('local');
+    [$a,$b,$c] = pair();
+
+    $response = $this->actingAs($a)->postJson('/api/v1/conversations/'.$c->id.'/attachments', [
+        'files' => [UploadedFile::fake()->create('large.zip', 1048576)],
+    ])->assertOk()->assertJsonPath('data.0.size', 1073741824);
+
+    $this->assertDatabaseHas('attachments', ['id' => $response->json('data.0.id'), 'user_id' => $a->id, 'size' => 1073741824]);
+});
+
+test('uploads above the default one GiB file limit return 422', function () {
+    Storage::fake('local');
+    [$a,$b,$c] = pair();
+
+    $this->actingAs($a)->postJson('/api/v1/conversations/'.$c->id.'/attachments', [
+        'files' => [UploadedFile::fake()->create('too-large.zip', 1048577)],
+    ])->assertUnprocessable()->assertJsonValidationErrors('files.0');
+
+    $this->assertDatabaseCount('attachments', 0);
+});
+
 test('attachment limits and active content download disposition are enforced', function () {
     Storage::fake('local');
     [$a,$b,$c] = pair();

@@ -27,6 +27,8 @@ php artisan schedule:work
 
 The scheduler expires calls every minute and removes abandoned uploads after 24 hours. Call/API requests also expire stale calls. Production should run `schedule:run` every minute via cron and supervise queue workers. Restart workers after deploying changes with `php artisan queue:restart`.
 
+Chat attachments allow up to 1 GiB per file for both web and native clients. Set `CHAT_MAX_FILE_KB=1048576` in existing environments that override this value, then clear/rebuild Laravel's configuration cache. PHP's `upload_max_filesize` must be at least `1G`, and `post_max_size` and any web server/proxy request-body limit must exceed the full multipart request size (for example, `2G` with the default 1 GiB total user storage quota). Allow enough request time for large uploads. The separate `CHAT_STORAGE_LIMIT_BYTES` quota still defaults to 1 GiB per user; existing uploads count toward it.
+
 For local testing, simply run `php artisan db:seed --class=AdminSeeder` to create `admin@example.com` / `password` when seed credentials are blank. To supply your own admin credentials instead, set these backend `.env` values:
 
 ```dotenv
