@@ -21,7 +21,7 @@ php artisan serve --host=127.0.0.1 --port=8000
 The admin command requests and confirms a hidden password (minimum 8 characters). The interactive command has no default credentials. Log in at `http://127.0.0.1:8000`. In development, `npm run dev` may replace the build step. Run these in separate terminals:
 
 ```powershell
-php artisan queue:work --tries=3 --timeout=90
+php artisan queue:work --queue=push,default --tries=3 --timeout=90
 php artisan schedule:work
 ```
 
@@ -95,7 +95,7 @@ Defaults: 25 MiB/file, 5 attachments/message and 1 GiB uploaded storage/user. Co
 
 Calls ring for 45 seconds. Accepted calls require a heartbeat from **both** participants every 20 seconds; the older participant heartbeat plus 90 seconds defines the lease. Scheduler/API expiry releases both call locks. Brief network disconnects use browser ICE recovery; failed ICE or lease expiration ends the call. Reloading during an active call cannot restore a peer connection: close/end the restored call and redial. Server state says a browser reported connected, not proof that media was delivered. SDP and ICE are never persisted in message history or queued; do not enable HTTP request body logging on signaling routes.
 
-Connected notifications require an open app. Device registration stores an encrypted optional push token and reports `push_delivery_enabled=false`. FCM/APNs delivery, background mobile incoming calls, CallKit/ConnectionService, and a React Native application are **not** implemented. No closed-app call delivery is claimed.
+Native clients can register FCM and Apple VoIP tokens, bound to their mobile login. Optional queued FCM/APNs delivery is implemented for messages and call state, with PushKit reserved for incoming iOS calls. Configure provider credentials and process the `push` queue; see [native push setup](docs/native-push.md). The native client must be rebuilt and tested on physical devices before closed-app calls can be considered verified. The browser client still requires an open tab for live alerts.
 
 Pusher pricing and free limits can change: confirm connection, message and event limits in your provider dashboard. A message creates conversation events for two participants plus a recipient notification and a conversation message event; typing is capped at 12/minute, heartbeats use the API, and notification metadata contains no message body. Large message events fall back to IDs; clients refetch. Hosting, database, email, object storage, Pusher and TURN bandwidth may cost money. No perpetual free service is promised.
 

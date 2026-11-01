@@ -77,7 +77,7 @@ All routes below require an active authenticated account unless explicitly ident
 | GET `/ice-servers`                               | —                                                             | `{ice_servers: RTCIceServer[],expires_in:number,expires_at:string}`   |
 | POST `/broadcasting/auth`                        | `{socket_id,channel_name}`                                    | Pusher authorization JSON                                             |
 | POST `/pusher/user-auth`                         | `{socket_id}`                                                 | Pusher authenticated-user JSON                                        |
-| PUT `/devices`                                   | `{device_id: UUID,platform:'web'                              | 'ios'                                                                 | 'android',push_token?:string}`                          | 201 `{push_delivery_enabled:false}` |
+| PUT `/devices`                                   | `{device_id: UUID,platform:'web'                              | 'ios'                                                                 | 'android',push_token?, voip_token?:string}`                          | 201 `{push_delivery_enabled:boolean, voip_delivery_enabled:boolean}` |
 | GET `/admin/users`                               | `q?`, `page?`                                                 | `{metrics:{total,active,pending,suspended,storage_bytes},users:page}` |
 | POST `/admin/users`                              | `{name,email,role,password,password_confirmation,status?}`    | 201 active user; password at least 8 characters, no invitation        |
 | PATCH `/admin/users/{user}`                      | `{name,email,role,status?,password?,password_confirmation?}`  | Updated user; optional password revokes sessions/tokens               |
@@ -144,3 +144,14 @@ Device registration is an integration contract, not a working push service. The 
 `DELETE /attachments/{attachment}` is uploader-only, works for staged and sent files, and returns 204. The original file and thumbnail are queued for deletion after commit; authenticated downloads immediately return 404. Removing the final attachment of a message without text marks the empty message deleted.
 
 `Message` includes nullable ISO timestamps `edited_at` and `deleted_at`. `v1.message.updated` broadcasts `{id,conversation_id}` on the conversation channel for edits, message deletion and sent-file deletion; both users also receive `v1.conversation.updated`. Refetch the loaded history on this event and after reconnect/polling to reconcile changes to older messages, including tombstones.
+
+### Native push device registration
+
+`PUT /devices` requires a bearer mobile login. Send `{device_id: UUID,
+platform: "android" | "ios", push_token?: string | null, voip_token?: string | null}`.
+Tokens are encrypted at rest. Omitted token fields preserve the existing value;
+explicit `null` removes it. The installation is assigned to the current account and
+access token. Revoking that token cascades deletion of its devices; expired tokens
+and suspended users cannot receive push. Response 201 includes
+`push_delivery_enabled` (FCM configured) and `voip_delivery_enabled` (APNs configured).
+These flags describe configuration, not guaranteed provider delivery.

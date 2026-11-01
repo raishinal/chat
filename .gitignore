@@ -42,3 +42,7 @@ yarn-error.log
 /boost.json
 /opencode.json
 /opencode.jsonc
+
+# Private native push credentials
+/storage/app/private/push/
+*firebase-adminsdk*.json

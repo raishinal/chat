@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
@@ -65,9 +66,21 @@ class AuthController extends Controller
     public function device(AuthDeviceRequest $r)
     {
         $v = $r->validated();
-        DB::table('devices')->updateOrInsert(['user_id' => $r->user()->id, 'device_id' => $v['device_id']], ['platform' => $v['platform'], 'push_token' => isset($v['push_token']) ? encrypt($v['push_token']) : null, 'updated_at' => now(), 'created_at' => now()]);
+        $token = $r->user()->currentAccessToken();
+        abort_unless($r->bearerToken() !== null, 422, 'A device requires a mobile login.');
+        DB::transaction(function () use ($v, $r, $token) {
+            // A physical installation belongs only to its most recent signed-in account.
+            DB::table('devices')->where('device_id', $v['device_id'])->where('user_id', '!=', $r->user()->id)->delete();
+            $values = ['platform' => $v['platform'], 'personal_access_token_id' => $token->id, 'updated_at' => now()];
+            foreach (['push_token', 'voip_token'] as $field) {
+                if (array_key_exists($field, $v)) {
+                    $values[$field] = $v[$field] ? Crypt::encryptString($v[$field]) : null;
+                }
+            }
+            DB::table('devices')->updateOrInsert(['user_id' => $r->user()->id, 'device_id' => $v['device_id']], $values + ['created_at' => now()]);
+        });
 
-        return response()->json(['push_delivery_enabled' => false], 201);
+        return response()->json(['push_delivery_enabled' => (bool) config('push.firebase_credentials'), 'voip_delivery_enabled' => (bool) config('push.apns_key_path')], 201);
     }
 
     /** @return array<string, string> */

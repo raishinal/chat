@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\ChatEvent;
+use App\Jobs\SendDevicePush;
 use App\Models\Call;
 use Illuminate\Support\Facades\DB;
 
@@ -11,6 +12,7 @@ class Calls
     public function publish(Call $call): void
     {
         foreach ([$call->caller_id, $call->callee_id] as $id) {
+            SendDevicePush::dispatch($id, 'call', ['call_id' => $call->id])->afterCommit();
             ChatEvent::dispatch('v1.users.'.$id, 'v1.call.updated', $call->toArray());
         }
     }
