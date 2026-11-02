@@ -722,6 +722,9 @@
 }
 .relay-call {
     width: 700px;
+    max-width: 100%;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
     border-radius: 25px;
     padding: 35px;
     background: #153d32;
@@ -777,6 +780,57 @@
     gap: 15px;
     justify-content: center;
     margin-top: 24px;
+}
+.relay-call-settings {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+}
+.relay-call-setting,
+.relay-call-setting > label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+}
+.relay-call-setting select {
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    background: #f5f7f0;
+    color: #234a38;
+    border: 1px solid #c8d2bf;
+    border-radius: 8px;
+    font-weight: 400;
+}
+.relay-call .relay-call-setting-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: #c1cfb6;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.6;
+    text-align: left;
+    text-transform: none;
+}
+.relay-call-choice {
+    width: 440px;
+}
+.relay-call-choice > p {
+    text-transform: none;
+    line-height: 1.6;
+}
+.relay-call-choice .relay-call-setting {
+    margin: 20px 0 12px;
+}
+@media (max-width: 600px) {
+    .relay-call-settings {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 .call-overlay {
     z-index: 70;

@@ -19,10 +19,32 @@ function track(kind) {
 
 await test('audio diagnostics distinguish capture and each media direction without exposing network data', () => {
     const summary = summarizeCallAudio([
-        { type: 'media-source', kind: 'audio', audioLevel: 0.4, totalAudioEnergy: 1.2, deviceId: 'private-device' },
-        { type: 'outbound-rtp', kind: 'audio', bytesSent: 4000, packetsSent: 40, transportId: 'private-transport' },
-        { type: 'inbound-rtp', mediaType: 'audio', bytesReceived: 0, packetsReceived: 0 },
-        { type: 'local-candidate', kind: 'audio', address: '192.0.2.1', usernameFragment: 'private-fragment' },
+        {
+            type: 'media-source',
+            kind: 'audio',
+            audioLevel: 0.4,
+            totalAudioEnergy: 1.2,
+            deviceId: 'private-device',
+        },
+        {
+            type: 'outbound-rtp',
+            kind: 'audio',
+            bytesSent: 4000,
+            packetsSent: 40,
+            transportId: 'private-transport',
+        },
+        {
+            type: 'inbound-rtp',
+            mediaType: 'audio',
+            bytesReceived: 0,
+            packetsReceived: 0,
+        },
+        {
+            type: 'local-candidate',
+            kind: 'audio',
+            address: '192.0.2.1',
+            usernameFragment: 'private-fragment',
+        },
         { type: 'outbound-rtp', kind: 'video', bytesSent: 9000 },
     ]);
     assert.equal(summary.length, 3);
@@ -74,7 +96,14 @@ await test('camera allocation failure preserves a live mandatory microphone', as
     });
     assert.deepEqual(requests, [
         { audio: true, video: false },
-        { audio: false, video: true },
+        {
+            audio: false,
+            video: {
+                width: { ideal: 640 },
+                height: { ideal: 360 },
+                frameRate: { ideal: 24, max: 24 },
+            },
+        },
     ]);
     assert.equal(media.getAudioTracks()[0], mic);
     assert.equal(mic.readyState, 'live');

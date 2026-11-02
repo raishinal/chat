@@ -4,6 +4,9 @@ import { store, update, signal as signalRoute } from '@/routes/api/calls';
 import { ice } from '@/routes/api';
 import {
     acquireCallMedia,
+    tuneCallVideo,
+    callVideoConstraints,
+    type CallVideoQuality,
     releaseCallMedia,
     addRemoteTrack,
     summarizeCallAudio,
@@ -11,6 +14,9 @@ import {
 import { createCallRingback } from '@/lib/call-ringback';
 import { confirmCallEnd } from '@/lib/call-ending';
 import { createCallConnectivityLoader } from '@/lib/call-connectivity';
+import { createCallIceSender } from '@/lib/call-ice-sender';
+import { retryCallSignal } from '@/lib/call-signal-retry';
+import { canApplyAnswer, RemoteDescriptions } from '@/lib/call-negotiation';
 export type Signal = {
     call_id: number;
     type: 'offer' | 'answer' | 'ice';
@@ -28,9 +34,13 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         [cameraAvailable, setCameraAvailable] = useState(false),
         [ending, setEnding] = useState(false),
         [accepting, setAccepting] = useState(false),
+        [starting, setStarting] = useState(false),
         [ringtoneBlocked, setRingtoneBlocked] = useState(false),
         [connectedAt, setConnectedAt] = useState<number | null>(null),
-        [endError, setEndError] = useState('');
+        [endError, setEndError] = useState(''),
+        [videoQuality, setVideoQuality] =
+            useState<CallVideoQuality>('performance'),
+        [changingVideoQuality, setChangingVideoQuality] = useState(false);
     const current = useRef<Call | null>(null),
         pc = useRef<RTCPeerConnection | null>(null),
         stream = useRef<MediaStream | null>(null),
@@ -42,6 +52,7 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             >(),
         ),
         offered = useRef(false),
+        remoteDescriptions = useRef(new RemoteDescriptions()),
         remoteStream = useRef<MediaStream | null>(null),
         signalQueue = useRef(Promise.resolve()),
         connectedReported = useRef(false),
@@ -49,7 +60,13 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         ringtone = useRef<ReturnType<typeof createCallRingback> | null>(null),
         preparing = useRef<Promise<RTCPeerConnection> | null>(null),
         generation = useRef(0),
+        quality = useRef<CallVideoQuality>('performance'),
+        qualityChange = useRef(false),
+        startingCall = useRef(false),
         mediaAbort = useRef<AbortController | null>(null),
+        iceSender = useRef<ReturnType<
+            typeof createCallIceSender<RTCIceCandidateInit>
+        > | null>(null),
         locallyEnded = useRef(new Set<number>()),
         dismissed = useRef(new Set<number>()),
         endingRequests = useRef(new Set<number>()),
@@ -62,6 +79,8 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         ),
     );
     function cleanup() {
+        iceSender.current?.stop();
+        iceSender.current = null;
         connectivityLoader.current.clear();
         ringtone.current?.stop();
         ringback.current?.stop();
@@ -76,6 +95,7 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         remoteStream.current = null;
         connectedReported.current = false;
         candidates.current = [];
+        remoteDescriptions.current.clear();
         chunks.current.clear();
         offered.current = false;
         preparing.current = null;
@@ -198,12 +218,31 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             closeSoon(next.id);
         }
     }
+    async function sendDescription(
+        id: number,
+        description: {
+            type: 'offer' | 'answer';
+            payload: RTCSessionDescriptionInit;
+        },
+    ) {
+        const signal = mediaAbort.current?.signal;
+        if (
+            !signal ||
+            current.current?.id !== id ||
+            locallyEnded.current.has(id)
+        )
+            throw new Error('Call ended.');
+        await retryCallSignal(
+            (attemptSignal) => api(signalRoute(id), description, attemptSignal),
+            signal,
+        );
+    }
     async function prepare(
         c: Call,
         connectivity?: { ice_servers: RTCIceServer[] },
     ): Promise<RTCPeerConnection> {
-        if (pc.current) return pc.current;
         if (preparing.current) return preparing.current;
+        if (pc.current) return pc.current;
         const gen = generation.current;
         const promise = (async () => {
             if (!navigator.mediaDevices?.getUserMedia)
@@ -214,30 +253,12 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             const config =
                 connectivity ?? (await connectivityLoader.current.load(c.id));
             if (gen !== generation.current) throw new Error('Call ended.');
-            mediaAbort.current = new AbortController();
-            const media = await acquireCallMedia(
-                c.kind === 'video',
-                navigator.mediaDevices,
-                mediaAbort.current.signal,
-            );
-            if (gen !== generation.current) {
-                media.getTracks().forEach((t) => t.stop());
-                throw new Error('Call ended.');
-            }
-            stream.current = media;
-            setLocal(media);
-            const hasCamera = media
-                .getVideoTracks()
-                .some((track) => track.readyState === 'live');
-            setCameraAvailable(hasCamera);
-            setCamera(hasCamera);
+            // Gather a candidate pool while the microphone and camera start.
             const peer = new RTCPeerConnection({
                 iceServers: config.ice_servers,
+                iceCandidatePoolSize: 1,
             });
             pc.current = peer;
-            media.getTracks().forEach((t) => peer.addTrack(t, media));
-            if (c.kind === 'video' && !hasCamera)
-                peer.addTransceiver('video', { direction: 'recvonly' });
             peer.ontrack = (e) => {
                 if (gen !== generation.current) return;
                 remoteStream.current ??= new MediaStream();
@@ -245,14 +266,32 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                 // A fresh wrapper also updates the player when another track arrives.
                 setRemote(new MediaStream(remoteStream.current.getTracks()));
             };
+            const sender = createCallIceSender<RTCIceCandidateInit>(
+                (candidate, signal) =>
+                    retryCallSignal(
+                        (attemptSignal) =>
+                            api(
+                                signalRoute(c.id),
+                                {
+                                    type: 'ice',
+                                    payload: candidate,
+                                },
+                                attemptSignal,
+                            ),
+                        signal,
+                    ),
+                (error) => {
+                    if (
+                        gen === generation.current &&
+                        !locallyEnded.current.has(c.id)
+                    )
+                        onError((error as Error).message);
+                },
+            );
+            iceSender.current = sender;
             peer.onicecandidate = (e) => {
-                if (e.candidate)
-                    void api(signalRoute(c.id), {
-                        type: 'ice',
-                        payload: e.candidate.toJSON(),
-                    }).catch((e) => {
-                        if (!locallyEnded.current.has(c.id)) onError(e.message);
-                    });
+                if (e.candidate && gen === generation.current)
+                    void sender.enqueue(e.candidate.toJSON());
             };
             // Report connectivity failures without logging SDP, addresses or credentials.
             const iceErrors: number[] = [];
@@ -338,6 +377,27 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             };
             peer.onconnectionstatechange = connectionChanged;
             peer.oniceconnectionstatechange = connectionChanged;
+            mediaAbort.current = new AbortController();
+            const media = await acquireCallMedia(
+                c.kind === 'video',
+                navigator.mediaDevices,
+                mediaAbort.current.signal,
+                quality.current,
+            );
+            if (gen !== generation.current) {
+                media.getTracks().forEach((t) => t.stop());
+                throw new Error('Call ended.');
+            }
+            stream.current = media;
+            setLocal(media);
+            const hasCamera = media
+                .getVideoTracks()
+                .some((track) => track.readyState === 'live');
+            setCameraAvailable(hasCamera);
+            setCamera(hasCamera);
+            media.getTracks().forEach((t) => peer.addTrack(t, media));
+            if (c.kind === 'video' && !hasCamera)
+                peer.addTransceiver('video', { direction: 'recvonly' });
             return peer;
         })();
         preparing.current = promise;
@@ -348,6 +408,13 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         }
     }
     async function start(conversation: number, kind: 'audio' | 'video') {
+        if (
+            startingCall.current ||
+            (current.current && !current.current.ended_at)
+        )
+            return;
+        startingCall.current = true;
+        setStarting(true);
         ringback.current ??= createCallRingback();
         void ringback.current.unlock();
         setConnectedAt(null);
@@ -369,6 +436,9 @@ export function useChatCall(me: number, onError: (s: string) => void) {
             if (current.current && !current.current.ended_at)
                 await action('failed').catch(() => cleanup());
             else cleanup();
+        } finally {
+            startingCall.current = false;
+            setStarting(false);
         }
     }
     useEffect(() => {
@@ -437,14 +507,37 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                 else candidates.current.push(payload);
                 return;
             }
+            // Recovery resends answers. A second answer must not fail an
+            // already negotiated call, even if its SDP includes more ICE.
+            if (s.type === 'answer' && !canApplyAnswer(peer.signalingState))
+                return;
+            const duplicate = remoteDescriptions.current.classify(payload);
+            if (duplicate !== 'new') {
+                if (
+                    duplicate === 'repeat' &&
+                    s.type === 'offer' &&
+                    peer.localDescription?.type === 'answer'
+                ) {
+                    await sendDescription(s.call_id, {
+                        type: 'answer',
+                        payload: {
+                            type: 'answer',
+                            sdp: peer.localDescription.sdp,
+                        },
+                    });
+                }
+                return;
+            }
             await peer.setRemoteDescription(payload);
+            remoteDescriptions.current.remember(payload);
             for (const candidate of candidates.current)
                 await peer.addIceCandidate(candidate);
             candidates.current = [];
             if (s.type === 'offer') {
                 const answer = await peer.createAnswer();
                 await peer.setLocalDescription(answer);
-                await api(signalRoute(s.call_id), {
+                void tuneCallVideo(peer, quality.current);
+                await sendDescription(s.call_id, {
                     type: 'answer',
                     payload: { type: answer.type, sdp: answer.sdp },
                 });
@@ -512,7 +605,8 @@ export function useChatCall(me: number, onError: (s: string) => void) {
                     const peer = await prepare(call);
                     const offer = await peer.createOffer();
                     await peer.setLocalDescription(offer);
-                    await api(signalRoute(call.id), {
+                    void tuneCallVideo(peer, quality.current);
+                    await sendDescription(call.id, {
                         type: 'offer',
                         payload: { type: offer.type, sdp: offer.sdp },
                     });
@@ -579,6 +673,7 @@ export function useChatCall(me: number, onError: (s: string) => void) {
     useEffect(
         () => () => {
             generation.current++;
+            iceSender.current?.stop();
             mediaAbort.current?.abort();
             connectivityLoader.current.clear();
             ringback.current?.dispose();
@@ -588,6 +683,31 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         },
         [],
     );
+    async function changeVideoQuality(next: CallVideoQuality) {
+        if (qualityChange.current || next === quality.current) return;
+        qualityChange.current = true;
+        setChangingVideoQuality(true);
+        const gen = generation.current;
+        try {
+            const track = stream.current?.getVideoTracks()[0];
+            if (track?.readyState === 'live') {
+                await track.applyConstraints(callVideoConstraints(next));
+                if (gen !== generation.current) return;
+                if (pc.current) await tuneCallVideo(pc.current, next);
+            }
+            if (gen !== generation.current) return;
+            quality.current = next;
+            setVideoQuality(next);
+        } catch {
+            if (gen === generation.current)
+                onError(
+                    'Could not switch video quality. Your camera may not support this setting.',
+                );
+        } finally {
+            qualityChange.current = false;
+            setChangingVideoQuality(false);
+        }
+    }
     return {
         call,
         local,
@@ -595,8 +715,12 @@ export function useChatCall(me: number, onError: (s: string) => void) {
         muted,
         camera,
         cameraAvailable,
+        videoQuality,
+        changingVideoQuality,
+        changeVideoQuality,
         ending,
         accepting,
+        starting,
         ringtoneBlocked,
         enableRingtone: async () => {
             ringtone.current ??= createCallRingback(undefined, true);

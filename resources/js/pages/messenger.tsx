@@ -1,5 +1,11 @@
 import { Head, Link, usePage } from '@inertiajs/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type RefObject,
+} from 'react';
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 import {
@@ -42,6 +48,12 @@ import {
 } from '@/lib/chat-api';
 import { useChatCall, type Signal } from '@/hooks/use-chat-call';
 import { callSeconds } from '@/lib/call-media';
+import { bindCallAudioPlayback } from '@/lib/call-audio-playback';
+import { CallAudioOutput } from '@/components/call-audio-output';
+import {
+    CallVideoQualitySelect,
+    CallVideoStartDialog,
+} from '@/components/call-video-quality';
 import { useNotificationSound } from '@/hooks/use-notification-sound';
 import { me, users as usersRoute } from '@/routes/api';
 import * as conversationsRoute from '@/routes/api/conversations';
@@ -107,37 +119,22 @@ function Avatar({ person }: { person: Person }) {
 function Media({
     stream,
     muted = false,
+    outputRef,
 }: {
     stream: MediaStream | null;
     muted?: boolean;
+    outputRef?: RefObject<HTMLAudioElement | null>;
 }) {
     const ref = useRef<HTMLVideoElement>(null);
-    const audioRef = useRef<HTMLAudioElement>(null);
+    const ownAudioRef = useRef<HTMLAudioElement>(null);
+    const audioRef = outputRef ?? ownAudioRef;
     const [audioBlocked, setAudioBlocked] = useState(false);
     useEffect(() => {
         if (ref.current) ref.current.srcObject = stream;
         const audio = audioRef.current;
-        let disposed = false;
-        if (audio && !muted) {
-            audio.srcObject = stream;
-            if (stream?.getAudioTracks().length)
-                void audio
-                    .play()
-                    .then(() => {
-                        if (!disposed) setAudioBlocked(false);
-                    })
-                    .catch(() => {
-                        if (!disposed) setAudioBlocked(true);
-                    });
-        }
-        return () => {
-            disposed = true;
-            if (audio) {
-                audio.pause();
-                audio.srcObject = null;
-            }
-        };
-    }, [stream, muted]);
+        if (audio && !muted && stream)
+            return bindCallAudioPlayback(audio, stream, setAudioBlocked);
+    }, [stream, muted, audioRef]);
     return (
         <>
             <video ref={ref} autoPlay playsInline muted />
@@ -268,6 +265,12 @@ export default function Messenger() {
         seenNotices = useRef(new Set<number>()),
         noticesInitialized = useRef(false);
     const call = useChatCall(self.id, setError);
+    const remoteAudio = useRef<HTMLAudioElement>(null);
+    const videoCallButton = useRef<HTMLButtonElement>(null);
+    const [videoCallTarget, setVideoCallTarget] = useState<number | null>(null);
+    useEffect(() => {
+        if (call.call?.id) setVideoCallTarget(null);
+    }, [call.call?.id]);
     const viewport = useRef<HTMLElement>(null);
     const historyContent = useRef<HTMLDivElement>(null);
     const followLatest = useRef(true);
@@ -1163,6 +1166,7 @@ export default function Messenger() {
                                         }
                                         disabled={
                                             !!activeCall ||
+                                            call.starting ||
                                             connection !== 'connected' ||
                                             !online
                                         }
@@ -1185,16 +1189,15 @@ export default function Messenger() {
                                         }
                                         disabled={
                                             !!activeCall ||
+                                            call.starting ||
                                             connection !== 'connected' ||
                                             !online
                                         }
                                         onClick={() =>
-                                            void call.start(
-                                                selected.id,
-                                                'video',
-                                            )
+                                            setVideoCallTarget(selected.id)
                                         }
                                         aria-label="Start video call"
+                                        ref={videoCallButton}
                                     >
                                         <Video />
                                     </button>
@@ -1989,6 +1992,29 @@ export default function Messenger() {
                         </section>
                     </div>
                 )}
+                <CallVideoStartDialog
+                    returnFocusRef={videoCallButton}
+                    open={videoCallTarget !== null && !activeCall}
+                    quality={call.videoQuality}
+                    disabled={
+                        call.starting ||
+                        call.changingVideoQuality ||
+                        connection !== 'connected' ||
+                        !online
+                    }
+                    onQualityChange={(value) =>
+                        void call.changeVideoQuality(value)
+                    }
+                    onOpenChange={(open) => {
+                        if (!open) setVideoCallTarget(null);
+                    }}
+                    onStart={() => {
+                        if (videoCallTarget === null) return;
+                        const target = videoCallTarget;
+                        setVideoCallTarget(null);
+                        void call.start(target, 'video');
+                    }}
+                />
                 {call.call && (
                     <div className="relay-overlay call-overlay">
                         <section
@@ -2040,7 +2066,10 @@ export default function Messenger() {
                                             : '')
                                     }
                                 >
-                                    <Media stream={call.remote} />
+                                    <Media
+                                        stream={call.remote}
+                                        outputRef={remoteAudio}
+                                    />
                                     {call.call.kind === 'video' && (
                                         <div className="relay-local">
                                             {call.cameraAvailable ? (
@@ -2065,6 +2094,44 @@ export default function Messenger() {
                                     )}
                                     {call.call.kind === 'audio' && (
                                         <Phone size={56} />
+                                    )}
+                                </div>
+                            )}
+                            {activeCall && (
+                                <div className="relay-call-settings">
+                                    <CallAudioOutput
+                                        key={call.call.id}
+                                        audioRef={remoteAudio}
+                                        mediaReady={!!call.local}
+                                    />
+                                    {call.call.kind === 'video' && (
+                                        <>
+                                            <CallVideoQualitySelect
+                                                value={call.videoQuality}
+                                                disabled={
+                                                    call.accepting ||
+                                                    call.changingVideoQuality ||
+                                                    (!call.local &&
+                                                        !(
+                                                            call.call.status ===
+                                                                'ringing' &&
+                                                            call.call
+                                                                .callee_id ===
+                                                                self.id
+                                                        ))
+                                                }
+                                                onChange={(value) =>
+                                                    void call.changeVideoQuality(
+                                                        value,
+                                                    )
+                                                }
+                                            />
+                                            <p className="relay-call-setting-note">
+                                                Changes your outgoing video. The
+                                                other person chooses their own
+                                                quality.
+                                            </p>
+                                        </>
                                     )}
                                 </div>
                             )}

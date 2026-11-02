@@ -1,8 +1,27 @@
+export type CallVideoQuality = 'performance' | 'high';
+
+export function callVideoConstraints(
+    quality: CallVideoQuality,
+): MediaTrackConstraints {
+    return quality === 'high'
+        ? {
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30, max: 30 },
+          }
+        : {
+              width: { ideal: 640 },
+              height: { ideal: 360 },
+              frameRate: { ideal: 24, max: 24 },
+          };
+}
+
 /** A microphone is required; camera failures must never prevent an audio call. */
 export async function acquireCallMedia(
     wantsVideo: boolean,
     mediaDevices: Pick<MediaDevices, 'getUserMedia'> = navigator.mediaDevices,
     signal?: AbortSignal,
+    quality: CallVideoQuality = 'performance',
 ): Promise<MediaStream> {
     if (signal?.aborted) throw new Error('Call ended.');
     let media: MediaStream;
@@ -28,7 +47,7 @@ export async function acquireCallMedia(
             try {
                 const video = await mediaDevices.getUserMedia({
                     audio: false,
-                    video: true,
+                    video: callVideoConstraints(quality),
                 });
                 if (signal?.aborted) {
                     video.getTracks().forEach((track) => track.stop());
@@ -134,4 +153,34 @@ export function summarizeCallAudio(stats: Iterable<AudioStat>) {
             packetsLost: entry.packetsLost,
             roundTripTime: entry.roundTripTime,
         }));
+}
+
+/** Apply the chosen outgoing profile without renegotiating the call. */
+export async function tuneCallVideo(
+    peer: RTCPeerConnection,
+    quality: CallVideoQuality = 'performance',
+): Promise<void> {
+    await Promise.all(
+        peer.getSenders().map(async (sender) => {
+            if (sender.track?.kind !== 'video') return;
+            try {
+                const parameters = sender.getParameters();
+                // Do not add encodings: their count is fixed by negotiation.
+                if (!parameters.encodings?.length) return;
+                parameters.degradationPreference =
+                    quality === 'high'
+                        ? 'maintain-resolution'
+                        : 'maintain-framerate';
+                for (const encoding of parameters.encodings) {
+                    encoding.maxBitrate =
+                        quality === 'high' ? 12_000_000 : 1_000_000;
+                    encoding.maxFramerate = quality === 'high' ? 30 : 24;
+                    encoding.scaleResolutionDownBy = 1;
+                }
+                await sender.setParameters(parameters);
+            } catch {
+                // Unsupported tuning or a peer closing must not interrupt a call.
+            }
+        }),
+    );
 }
